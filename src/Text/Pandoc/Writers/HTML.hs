@@ -37,7 +37,6 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
-import Network.HTTP (urlEncode)
 import Network.URI (URI (..), parseURIReference)
 import Numeric (showHex)
 import Text.DocLayout (render, literal)
@@ -56,6 +55,7 @@ import Text.Pandoc.Walk
 import Text.Pandoc.Writers.Math
 import Text.Pandoc.Writers.Shared
 import qualified Text.Pandoc.Writers.AnnotatedTable as Ann
+import Text.Pandoc.Network.HTTP (urlEncode)
 import Text.Pandoc.XML (escapeStringForXML, fromEntities, toEntities,
                         html5Attributes, html4Attributes, rdfaAttributes)
 import qualified Text.Blaze.XHtml5 as H5
@@ -74,9 +74,11 @@ import Text.TeXMath
 import Text.XML.Light (elChildren, unode, unqual)
 import qualified Text.XML.Light as XML
 import Text.XML.Light.Output
+import Data.String (fromString)
 
 data WriterState = WriterState
     { stNotes        :: [Html]  -- ^ List of notes
+    , stEmittedNotes :: Int     -- ^ How many notes we've already pushed out to the HTML
     , stMath         :: Bool    -- ^ Math is used in document
     , stQuotes       :: Bool    -- ^ <q> tag is used
     , stHighlighting :: Bool    -- ^ Syntax highlighting is used
@@ -88,10 +90,11 @@ data WriterState = WriterState
     , stCodeBlockNum :: Int     -- ^ Number of code block
     , stCsl          :: Bool    -- ^ Has CSL references
     , stCslEntrySpacing :: Maybe Int  -- ^ CSL entry spacing
+    , stBlockLevel   :: Int     -- ^ Current block depth, excluding section divs
     }
 
 defaultWriterState :: WriterState
-defaultWriterState = WriterState {stNotes= [], stMath = False, stQuotes = False,
+defaultWriterState = WriterState {stNotes= [], stEmittedNotes = 0, stMath = False, stQuotes = False,
                                   stHighlighting = False,
                                   stHtml5 = False,
                                   stEPUBVersion = Nothing,
@@ -100,7 +103,8 @@ defaultWriterState = WriterState {stNotes= [], stMath = False, stQuotes = False,
                                   stInSection = False,
                                   stCodeBlockNum = 0,
                                   stCsl = False,
-                                  stCslEntrySpacing = Nothing}
+                                  stCslEntrySpacing = Nothing,
+                                  stBlockLevel = 0}
 
 -- Helpers to render HTML with the appropriate function.
 
@@ -266,8 +270,16 @@ pandocToHtml opts (Pandoc meta blocks) = do
             then fmap renderHtml' <$> tableOfContents opts sects
             else return Nothing
   blocks' <- blockListToHtml opts sects
+  notes <- do
+    -- make the st private just to be safe, since we modify it right afterwards
+    st <- get
+    if null (stNotes st)
+      then return mempty
+      else do
+        notes <- footnoteSection opts EndOfDocument (stEmittedNotes st + 1) (reverse (stNotes st))
+        modify (\st' -> st'{ stNotes = mempty, stEmittedNotes = stEmittedNotes st' + length (stNotes st') })
+        return notes
   st <- get
-  notes <- footnoteSection opts (reverse (stNotes st))
   let thebody = blocks' >> notes
   let math = case writerHTMLMathMethod opts of
         MathJax url
@@ -355,7 +367,7 @@ pandocToHtml opts (Pandoc meta blocks) = do
                          defField "slideNumber" False .
                          defField "showSlideNumber" ("all" :: Text) .
                          defField "hashOneBasedIndex" False .
-                         defField "hash" False .
+                         defField "hash" True .
                          defField "respondToHashChanges" True .
                          defField "history" False .
                          defField "keyboard" True .
@@ -490,28 +502,43 @@ tableOfContents opts sects = do
 
 -- | Convert list of Note blocks to a footnote <div>.
 -- Assumes notes are sorted.
-footnoteSection :: PandocMonad m
-                => WriterOptions -> [Html] -> StateT WriterState m Html
-footnoteSection opts notes = do
+footnoteSection ::
+  PandocMonad m => WriterOptions -> ReferenceLocation -> Int -> [Html] -> StateT WriterState m Html
+footnoteSection opts refLocation startCounter notes = do
   html5 <- gets stHtml5
   slideVariant <- gets stSlideVariant
-  let hrtag = if html5 then H5.hr else H.hr
+  let hrtag = if refLocation /= EndOfBlock then (if html5 then H5.hr else H.hr) else mempty
+  let additionalClassName = case refLocation of
+        EndOfBlock -> "footnotes-end-of-block"
+        EndOfDocument -> "footnotes-end-of-document"
+        EndOfSection -> "footnotes-end-of-section"
+  let className = "footnotes " <> additionalClassName
   epubVersion <- gets stEPUBVersion
   let container x
         | html5
         , epubVersion == Just EPUB3
-                = H5.section ! A.class_ "footnotes"
+                = H5.section ! A.class_ className
                              ! customAttribute "epub:type" "footnotes" $ x
-        | html5 = H5.section ! A.class_ "footnotes"
+        | html5 = H5.section ! A.class_ className
                              ! customAttribute "role" "doc-endnotes"
                              $ x
         | slideVariant /= NoSlides = H.div ! A.class_ "footnotes slide" $ x
-        | otherwise = H.div ! A.class_ "footnotes" $ x
+        | otherwise = H.div ! A.class_ className $ x
   return $
     if null notes
        then mempty
-       else nl opts >> container (nl opts >> hrtag >> nl opts >>
-              H.ol (mconcat notes >> nl opts) >> nl opts)
+       else do
+         nl opts
+         container $ do
+           nl opts
+           hrtag
+           nl opts
+           -- Keep the previous output exactly the same if we don't
+           -- have multiple notes sections
+           if startCounter == 1
+             then H.ol $ mconcat notes >> nl opts
+             else H.ol ! A.start (fromString (show startCounter)) $ mconcat notes >> nl opts
+           nl opts
 
 -- | Parse a mailto link; return Just (name, domain) or Nothing.
 parseMailto :: Text -> Maybe (Text, Text)
@@ -659,17 +686,20 @@ dimensionsToAttrList attr = consolidateStyles $ go Width ++ go Height
 figure :: PandocMonad m
        => WriterOptions -> Attr -> [Inline] -> (Text, Text)
        -> StateT WriterState m Html
-figure opts attr txt (s,tit) = do
+figure opts attr@(_, _, attrList) txt (s,tit) = do
   html5 <- gets stHtml5
   -- Screen-readers will normally read the @alt@ text and the figure; we
   -- want to avoid them reading the same text twice. With HTML5 we can
   -- use aria-hidden for the caption; with HTML4, we use an empty
   -- alt-text instead.
+  -- When the alt text differs from the caption both should be read.
   let alt = if html5 then txt else [Str ""]
   let tocapt = if html5
-                  then H5.figcaption !
-                       H5.customAttribute (textTag "aria-hidden")
-                                          (toValue @Text "true")
+                  then (H5.figcaption !) $
+                       if isJust (lookup "alt" attrList)
+                          then mempty
+                          else H5.customAttribute (textTag "aria-hidden")
+                                                  (toValue @Text "true")
                   else H.p ! A.class_ "caption"
   img <- inlineToHtml opts (Image attr alt (s,tit))
   capt <- if null txt
@@ -699,11 +729,10 @@ adjustNumbers opts doc =
    fixnum x = x
    showSecNum = T.intercalate "." . map tshow
 
--- | Convert Pandoc block element to HTML.
-blockToHtml :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
-blockToHtml _ Null = return mempty
-blockToHtml opts (Plain lst) = inlineListToHtml opts lst
-blockToHtml opts (Para [Image attr@(_,classes,_) txt (src,tit)])
+blockToHtmlInner :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
+blockToHtmlInner _ Null = return mempty
+blockToHtmlInner opts (Plain lst) = inlineListToHtml opts lst
+blockToHtmlInner opts (Para [Image attr@(_,classes,_) txt (src,tit)])
   | "stretch" `elem` classes = do
   slideVariant <- gets stSlideVariant
   case slideVariant of
@@ -713,20 +742,20 @@ blockToHtml opts (Para [Image attr@(_,classes,_) txt (src,tit)])
          inlineToHtml opts (Image attr txt (src, tit))
        _ -> figure opts attr txt (src, tit)
 -- title beginning with fig: indicates that the image is a figure
-blockToHtml opts (Para [Image attr txt (s,T.stripPrefix "fig:" -> Just tit)]) =
+blockToHtmlInner opts (Para [Image attr txt (s,T.stripPrefix "fig:" -> Just tit)]) =
   figure opts attr txt (s,tit)
-blockToHtml opts (Para lst) = do
+blockToHtmlInner opts (Para lst) = do
   contents <- inlineListToHtml opts lst
   case contents of
        Empty _ | not (isEnabled Ext_empty_paragraphs opts) -> return mempty
        _ -> return $ H.p contents
-blockToHtml opts (LineBlock lns) =
+blockToHtmlInner opts (LineBlock lns) =
   if writerWrapText opts == WrapNone
   then blockToHtml opts $ linesToPara lns
   else do
     htmlLines <- inlineListToHtml opts $ intercalate [LineBreak] lns
     return $ H.div ! A.class_ "line-block" $ htmlLines
-blockToHtml opts (Div (ident, "section":dclasses, dkvs)
+blockToHtmlInner opts (Div (ident, "section":dclasses, dkvs)
                    (Header level
                      hattr@(hident,hclasses,hkvs) ils : xs)) = do
   slideVariant <- gets stSlideVariant
@@ -807,7 +836,7 @@ blockToHtml opts (Div (ident, "section":dclasses, dkvs)
                      if null innerSecs
                         then mempty
                         else nl opts <> innerContents
-blockToHtml opts (Div attr@(ident, classes, kvs') bs) = do
+blockToHtmlInner opts (Div attr@(ident, classes, kvs') bs) = do
   html5 <- gets stHtml5
   slideVariant <- gets stSlideVariant
   let isCslBibBody = ident == "refs" || "csl-bib-body" `elem` classes
@@ -861,7 +890,7 @@ blockToHtml opts (Div attr@(ident, classes, kvs') bs) = do
                _              -> return mempty
      else addAttrs opts (ident, classes'', kvs) $
               divtag contents'
-blockToHtml opts (RawBlock f str) = do
+blockToHtmlInner opts (RawBlock f str) = do
   ishtml <- isRawHtml f
   if ishtml
      then return $ preEscapedText str
@@ -872,10 +901,10 @@ blockToHtml opts (RawBlock f str) = do
              else do
                report $ BlockNotRendered (RawBlock f str)
                return mempty
-blockToHtml _ HorizontalRule = do
+blockToHtmlInner _ HorizontalRule = do
   html5 <- gets stHtml5
   return $ if html5 then H5.hr else H.hr
-blockToHtml opts (CodeBlock (id',classes,keyvals) rawCode) = do
+blockToHtmlInner opts (CodeBlock (id',classes,keyvals) rawCode) = do
   id'' <- if T.null id'
              then do
                modify $ \st -> st{ stCodeBlockNum = stCodeBlockNum st + 1 }
@@ -907,7 +936,7 @@ blockToHtml opts (CodeBlock (id',classes,keyvals) rawCode) = do
                     -- we set writerIdentifierPrefix to "" since id'' already
                     -- includes it:
                     addAttrs opts{writerIdentifierPrefix = ""} (id'',[],keyvals) h
-blockToHtml opts (BlockQuote blocks) = do
+blockToHtmlInner opts (BlockQuote blocks) = do
   -- in S5, treat list in blockquote specially
   -- if default is incremental, make it nonincremental;
   -- otherwise incremental
@@ -929,7 +958,7 @@ blockToHtml opts (BlockQuote blocks) = do
      else do
        contents <- blockListToHtml opts blocks
        return $ H.blockquote $ nl opts >> contents >> nl opts
-blockToHtml opts (Header level (ident,classes,kvs) lst) = do
+blockToHtmlInner opts (Header level (ident,classes,kvs) lst) = do
   contents <- inlineListToHtml opts lst
   let secnum = fromMaybe mempty $ lookup "number" kvs
   let contents' = if writerNumberSections opts && not (T.null secnum)
@@ -952,12 +981,12 @@ blockToHtml opts (Header level (ident,classes,kvs) lst) = do
               5 -> H.h5 contents'
               6 -> H.h6 contents'
               _ -> H.p ! A.class_ "heading" $ contents'
-blockToHtml opts (BulletList lst) = do
+blockToHtmlInner opts (BulletList lst) = do
   contents <- mapM (listItemToHtml opts) lst
   let isTaskList = not (null lst) && all isTaskListItem lst
   (if isTaskList then (! A.class_ "task-list") else id) <$>
     unordList opts contents
-blockToHtml opts (OrderedList (startnum, numstyle, _) lst) = do
+blockToHtmlInner opts (OrderedList (startnum, numstyle, _) lst) = do
   contents <- mapM (listItemToHtml opts) lst
   html5 <- gets stHtml5
   let numstyle' = case numstyle of
@@ -980,7 +1009,7 @@ blockToHtml opts (OrderedList (startnum, numstyle, _) lst) = do
                    else [])
   l <- ordList opts contents
   return $ foldl' (!) l attribs
-blockToHtml opts (DefinitionList lst) = do
+blockToHtmlInner opts (DefinitionList lst) = do
   contents <- mapM (\(term, defs) ->
                   do term' <- liftM H.dt $ inlineListToHtml opts term
                      defs' <- mapM (liftM (\x -> H.dd (x >> nl opts)) .
@@ -988,8 +1017,38 @@ blockToHtml opts (DefinitionList lst) = do
                      return $ mconcat $ nl opts : term' : nl opts :
                                         intersperse (nl opts) defs') lst
   defList opts contents
-blockToHtml opts (Table attr caption colspecs thead tbody tfoot) =
+blockToHtmlInner opts (Table attr caption colspecs thead tbody tfoot) =
   tableToHtml opts (Ann.toTable attr caption colspecs thead tbody tfoot)
+
+-- | Convert Pandoc block element to HTML. All the legwork is done by
+-- 'blockToHtmlInner', this just takes care of emitting the notes after
+-- the block if necessary.
+blockToHtml :: PandocMonad m => WriterOptions -> Block -> StateT WriterState m Html
+blockToHtml opts block = do
+  -- Ignore inserted section divs -- they are not blocks as they came from
+  -- the document itself (at least not when coming from markdown)
+  let isSection = case block of
+        Div (_, classes, _) _ | "section" `elem` classes -> True
+        _ -> False
+  let increaseLevel = not isSection
+  when increaseLevel $
+    modify (\st -> st{ stBlockLevel = stBlockLevel st + 1 })
+  doc <- blockToHtmlInner opts block
+  st <- get
+  let emitNotes =
+        (writerReferenceLocation opts == EndOfBlock && stBlockLevel st == 1) ||
+        (writerReferenceLocation opts == EndOfSection && isSection)
+  res <- if emitNotes
+    then do
+      notes <- if null (stNotes st)
+        then return mempty
+        else footnoteSection opts (writerReferenceLocation opts) (stEmittedNotes st + 1) (reverse (stNotes st))
+      modify (\st' -> st'{ stNotes = mempty, stEmittedNotes = stEmittedNotes st' + length (stNotes st') })
+      return (doc <> notes)
+    else return doc
+  when increaseLevel $
+    modify (\st' -> st'{ stBlockLevel = stBlockLevel st' - 1 })
+  return res
 
 tableToHtml :: PandocMonad m
             => WriterOptions
@@ -1374,7 +1433,7 @@ inlineToHtml opts inline = do
                            InlineMath  -> "\\textstyle "
                            DisplayMath -> "\\displaystyle "
               return $ imtag ! A.style "vertical-align:middle"
-                             ! A.src (toValue $ url <> T.pack (urlEncode (T.unpack $ s <> str)))
+                             ! A.src (toValue . (url <>) . urlEncode $ s <> str)
                              ! A.alt (toValue str)
                              ! A.title (toValue str)
                              ! A.class_ mathClass
@@ -1409,13 +1468,17 @@ inlineToHtml opts inline = do
       ishtml <- isRawHtml f
       if ishtml
          then return $ preEscapedText str
-         else if (f == Format "latex" || f == Format "tex") &&
-                allowsMathEnvironments (writerHTMLMathMethod opts) &&
-                isMathEnvironment str
-                then inlineToHtml opts $ Math DisplayMath str
-                else do
-                  report $ InlineNotRendered inline
-                  return mempty
+         else do
+           let istex = f == Format "latex" || f == Format "tex"
+           let mm = writerHTMLMathMethod opts
+           case istex of
+             True
+               | allowsMathEnvironments mm && isMathEnvironment str
+                 -> inlineToHtml opts $ Math DisplayMath str
+               | allowsRef mm && isRef str
+                 -> inlineToHtml opts $ Math InlineMath str
+             _ -> do report $ InlineNotRendered inline
+                     return mempty
     (Link attr txt (s,_)) | "mailto:" `T.isPrefixOf` s -> do
                         linkText <- inlineListToHtml opts txt
                         obfuscateLink opts attr linkText s
@@ -1465,7 +1528,8 @@ inlineToHtml opts inline = do
                         -- note:  null title included, as in Markdown.pl
     (Note contents) -> do
                         notes <- gets stNotes
-                        let number = length notes + 1
+                        emittedNotes <- gets stEmittedNotes
+                        let number = emittedNotes + length notes + 1
                         let ref = tshow number
                         htmlContents <- blockListToNote opts ref contents
                         epubVersion <- gets stEPUBVersion
@@ -1542,6 +1606,9 @@ inDiv cls x = do
     (if html5 then H5.div else H.div)
                 x ! A.class_ (toValue cls)
 
+isRef :: Text -> Bool
+isRef t = "\\ref{" `T.isPrefixOf` t || "\\eqref{" `T.isPrefixOf` t
+
 isMathEnvironment :: Text -> Bool
 isMathEnvironment s = "\\begin{" `T.isPrefixOf` s &&
                          envName `elem` mathmlenvs
@@ -1576,9 +1643,14 @@ isMathEnvironment s = "\\begin{" `T.isPrefixOf` s &&
 
 allowsMathEnvironments :: HTMLMathMethod -> Bool
 allowsMathEnvironments (MathJax _) = True
+allowsMathEnvironments (KaTeX _)   = True
 allowsMathEnvironments MathML      = True
 allowsMathEnvironments (WebTeX _)  = True
 allowsMathEnvironments _           = False
+
+allowsRef :: HTMLMathMethod -> Bool
+allowsRef (MathJax _) = True
+allowsRef _           = False
 
 -- | List of intrinsic event attributes allowed on all elements in HTML4.
 intrinsicEventsHTML4 :: [Text]

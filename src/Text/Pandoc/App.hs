@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE CPP                 #-}
@@ -25,9 +26,9 @@ module Text.Pandoc.App (
           , applyFilters
           ) where
 import qualified Control.Exception as E
-import Control.Monad ( (>=>), when )
+import Control.Monad ( (>=>), when, forM_ )
 import Control.Monad.Trans ( MonadIO(..) )
-import Control.Monad.Except (throwError)
+import Control.Monad.Except (throwError, catchError)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
@@ -38,17 +39,20 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TE
+import qualified Data.Text.Encoding as TSE
 import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Encoding.Error as TSE
 import Network.URI (URI (..), parseURI)
 import System.Directory (doesDirectoryExist)
 import System.Exit (exitSuccess)
-import System.FilePath ( takeBaseName, takeExtension )
+import System.FilePath ( takeBaseName, takeExtension)
 import System.IO (nativeNewline, stdout)
 import qualified System.IO as IO (Newline (..))
 import Text.Pandoc
 import Text.Pandoc.Builder (setMeta)
-import Text.Pandoc.MIME (getCharset)
+import Text.Pandoc.MediaBag (mediaItems)
+import Text.Pandoc.MIME (getCharset, MimeType)
+import Text.Pandoc.Image (svgToPng)
 import Text.Pandoc.App.FormatHeuristics (formatFromFilePaths)
 import Text.Pandoc.App.Opt (Opt (..), LineEnding (..), defaultOpts,
                             IpynbOutput (..))
@@ -94,39 +98,23 @@ convertWithOpts opts = do
   let sources = case optInputFiles opts of
                      Just xs | not (optIgnoreArgs opts) -> xs
                      _ -> ["-"]
-
-  let runIO' :: PandocIO a -> IO a
-      runIO' f = do
-        (res, reports) <- runIOorExplode $ do
-                             setTrace (optTrace opts)
-                             setVerbosity verbosity
-                             x <- f
-                             rs <- getLog
-                             return (x, rs)
-        case optLogFile opts of
-             Nothing      -> return ()
-             Just logfile -> BL.writeFile logfile (encodeLogMessages reports)
-        let isWarning msg = messageVerbosity msg == WARNING
-        when (optFailIfWarnings opts && any isWarning reports) $
-            E.throwIO PandocFailOnWarningError
-        return res
-
-  let eol = case optEol opts of
-                 CRLF   -> IO.CRLF
-                 LF     -> IO.LF
-                 Native -> nativeNewline
 #ifdef _WINDOWS
   let istty = True
 #else
   istty <- liftIO $ queryTerminal stdOutput
 #endif
 
-  runIO' $ do
+  res <- runIO $ do
+
+    setTrace (optTrace opts)
+    setVerbosity verbosity
     setUserDataDir datadir
     setResourcePath (optResourcePath opts)
 
     setInputFiles (fromMaybe ["-"] (optInputFiles opts))
     setOutputFile (optOutputFile opts)
+
+    inputs <- readSources sources
 
     -- assign reader and writer based on options and filenames
     readerName <- case optFrom opts of
@@ -151,21 +139,26 @@ convertWithOpts opts = do
             <> "` instead of `pandoc " <> inputFile <> " -o " <> outputFile <> "`."
         _ -> return ()
 
-    (reader :: Reader PandocIO, readerExts) <- getReader readerName
 
-    let convertTabs = tabFilter (if optPreserveTabs opts ||
-                                      readerNameBase == "t2t" ||
-                                      readerNameBase == "man"
-                                    then 0
-                                    else optTabStop opts)
+    let makeSandboxed pureReader =
+          let files = maybe id (:) (optReferenceDoc opts) .
+                      maybe id (:) (optEpubMetadata opts) .
+                      maybe id (:) (optEpubCoverImage opts) .
+                      maybe id (:) (optCSL opts) .
+                      maybe id (:) (optCitationAbbreviations opts) $
+                      optEpubFonts opts ++
+                      optBibliography opts
+           in  case pureReader of
+                 TextReader r -> TextReader $ \o t -> sandbox files (r o t)
+                 ByteStringReader r
+                            -> ByteStringReader $ \o t -> sandbox files (r o t)
 
-
-    let readSources :: [FilePath] -> PandocIO [(FilePath, Text)]
-        readSources srcs =
-          mapM (\fp -> do
-                   t <- readSource fp
-                   return (if fp == "-" then "" else fp, convertTabs t)) srcs
-
+    (reader, readerExts) <-
+      if optSandbox opts
+         then case runPure (getReader readerName) of
+                Left e -> throwError e
+                Right (r, rexts) -> return (makeSandboxed r, rexts)
+         else getReader readerName
 
     outputSettings <- optToOutputSettings opts
     let format = outputFormat outputSettings
@@ -254,20 +247,11 @@ convertWithOpts opts = do
                                             _        -> Format format) :))
                      $ []
 
-    let sourceToDoc :: [FilePath] -> PandocIO Pandoc
-        sourceToDoc sources' =
-           case reader of
-             TextReader r
-               | readerNameBase == "json" ->
-                   mconcat <$> mapM (readSource >=> r readerOpts) sources'
-               | optFileScope opts  ->
-                   -- Read source and convert tabs (see #6709)
-                   let readSource' = fmap convertTabs . readSource
-                   in mconcat <$> mapM (readSource' >=> r readerOpts) sources'
-               | otherwise ->
-                   readSources sources' >>= r readerOpts
-             ByteStringReader r ->
-               mconcat <$> mapM (readFile' >=> r readerOpts) sources'
+    let convertTabs = tabFilter (if optPreserveTabs opts ||
+                                      readerNameBase == "t2t" ||
+                                      readerNameBase == "man"
+                                    then 0
+                                    else optTabStop opts)
 
 
     when (readerNameBase == "markdown_github" ||
@@ -293,8 +277,25 @@ convertWithOpts opts = do
           maybe id (setMeta "citation-abbreviations")
                          (optCitationAbbreviations opts) $ mempty
 
-    doc <- sourceToDoc sources >>=
-              (   (if isJust (optExtractMedia opts)
+    doc <- (case reader of
+             TextReader r
+               | readerNameBase == "json" ->
+                   mconcat <$>
+                      mapM (inputToText convertTabs
+                             >=> r readerOpts . (:[])) inputs
+               | optFileScope opts  ->
+                   mconcat <$> mapM
+                      (inputToText convertTabs
+                             >=> r readerOpts . (:[]))
+                      inputs
+               | otherwise -> mapM (inputToText convertTabs) inputs
+                                >>= r readerOpts
+             ByteStringReader r ->
+               mconcat <$> mapM (r readerOpts . inputToLazyByteString) inputs)
+            >>=
+              (   (if not (optSandbox opts) &&
+                      (isJust (optExtractMedia opts)
+                       || writerNameBase == "docx") -- for fallback pngs
                       then fillMediaBag
                       else return)
               >=> return . adjustMetadata (metadataFromFile <>)
@@ -305,14 +306,28 @@ convertWithOpts opts = do
               >=> maybe return extractMedia (optExtractMedia opts)
               )
 
-    case writer of
-      ByteStringWriter f -> f writerOptions doc >>= writeFnBinary outputFile
+    when (writerNameBase == "docx" && not (optSandbox opts)) $ do
+      -- create fallback pngs for svgs
+      items <- mediaItems <$> getMediaBag
+      forM_ items $ \(fp, mt, bs) ->
+        case T.takeWhile (/=';') mt of
+          "image/svg+xml" -> do
+            res <- svgToPng (writerDpi writerOptions) bs
+            case res of
+              Right bs' -> do
+                let fp' = fp <> ".png"
+                insertMedia fp' (Just "image/png") bs'
+              Left e -> report $ CouldNotConvertImage (T.pack fp) (tshow e)
+          _ -> return ()
+
+    output <- case writer of
+      ByteStringWriter f -> BinaryOutput <$> f writerOptions doc
       TextWriter f -> case outputPdfProgram outputSettings of
         Just pdfProg -> do
                 res <- makePDF pdfProg (optPdfEngineOpts opts) f
                         writerOptions doc
                 case res of
-                     Right pdf -> writeFnBinary outputFile pdf
+                     Right pdf -> return $ BinaryOutput pdf
                      Left err' -> throwError $ PandocPDFError $
                                      TL.toStrict (TE.decodeUtf8With TE.lenientDecode err')
 
@@ -321,11 +336,32 @@ convertWithOpts opts = do
                       | standalone = t
                       | T.null t || T.last t /= '\n' = t <> T.singleton '\n'
                       | otherwise = t
-                output <- ensureNl <$> f writerOptions doc
-                writerFn eol outputFile =<<
-                  if optSelfContained opts && htmlFormat format
-                     then makeSelfContained output
-                     else return output
+                textOutput <- ensureNl <$> f writerOptions doc
+                if optSelfContained opts && htmlFormat format
+                   then TextOutput <$> makeSelfContained textOutput
+                   else return $ TextOutput textOutput
+    reports <- getLog
+    return (output, reports)
+
+  case res of
+    Left e -> E.throwIO e
+    Right (output, reports) -> do
+      case optLogFile opts of
+           Nothing      -> return ()
+           Just logfile -> BL.writeFile logfile (encodeLogMessages reports)
+      let isWarning msg = messageVerbosity msg == WARNING
+      when (optFailIfWarnings opts && any isWarning reports) $
+          E.throwIO PandocFailOnWarningError
+      let eol = case optEol opts of
+                     CRLF   -> IO.CRLF
+                     LF     -> IO.LF
+                     Native -> nativeNewline
+      case output of
+        TextOutput t    -> writerFn eol outputFile t
+        BinaryOutput bs -> writeFnBinary outputFile bs
+
+data PandocOutput = TextOutput Text | BinaryOutput BL.ByteString
+  deriving (Show)
 
 type Transform = Pandoc -> Pandoc
 
@@ -344,49 +380,68 @@ adjustMetadata f (Pandoc meta bs) = Pandoc (f meta) bs
 applyTransforms :: Monad m => [Transform] -> Pandoc -> m Pandoc
 applyTransforms transforms d = return $ foldr ($) d transforms
 
-readSource :: FilePath -> PandocIO Text
-readSource src = case parseURI src of
-                      Just u | uriScheme u `elem` ["http:","https:"] ->
-                                 readURI src
-                             | uriScheme u == "file:" -> liftIO $
-                                 readTextFile (uriPathToPath $ T.pack $ uriPath u)
-                      _       -> liftIO $ readTextFile src
-  where readTextFile :: FilePath -> IO Text
-        readTextFile fp = do
-          bs <- if src == "-"
-                   then BS.getContents
-                   else BS.readFile fp
-          E.catch (return $! UTF8.toText bs)
-             (\e -> E.throwIO $ case e of
-                         TSE.DecodeError _ (Just w) ->
-                           case BS.elemIndex w bs of
-                             Just offset ->
-                                  PandocUTF8DecodingError (T.pack fp) offset w
-                             _ -> PandocUTF8DecodingError (T.pack fp) 0 w
-                         _ -> PandocAppError (tshow e))
+readSources :: (PandocMonad m, MonadIO m)
+            => [FilePath] -> m [(FilePath, (BS.ByteString, Maybe MimeType))]
+readSources srcs =
+  mapM (\fp -> do t <- readSource fp
+                  return (if fp == "-" then "" else fp, t)) srcs
 
-readURI :: FilePath -> PandocIO Text
-readURI src = do
-  (bs, mt) <- openURL (T.pack src)
+readSource :: (PandocMonad m, MonadIO m)
+           => FilePath -> m (BS.ByteString, Maybe MimeType)
+readSource "-" = (,Nothing) <$> readStdinStrict
+readSource src =
+  case parseURI src of
+    Just u | uriScheme u `elem` ["http:","https:"] -> openURL (T.pack src)
+           | uriScheme u == "file:" ->
+               (,Nothing) <$>
+                 readFileStrict (uriPathToPath $ T.pack $ uriPath u)
+    _       -> (,Nothing) <$> readFileStrict src
+
+utf8ToText :: PandocMonad m => FilePath -> BS.ByteString -> m Text
+utf8ToText fp bs =
+  case TSE.decodeUtf8' . dropBOM $ bs of
+    Left (TSE.DecodeError _ (Just w)) ->
+      case BS.elemIndex w bs of
+        Just offset -> throwError $ PandocUTF8DecodingError (T.pack fp) offset w
+        Nothing -> throwError $ PandocUTF8DecodingError (T.pack fp) 0 w
+    Left e -> throwError $ PandocAppError (tshow e)
+    Right t -> return t
+ where
+   dropBOM bs' =
+     if "\xEF\xBB\xBF" `BS.isPrefixOf` bs'
+        then BS.drop 3 bs'
+        else bs'
+
+
+inputToText :: PandocMonad m
+            => (Text -> Text)
+            -> (FilePath, (BS.ByteString, Maybe MimeType))
+            -> m (FilePath, Text)
+inputToText convTabs (fp, (bs,mt)) =
+  (fp,) . convTabs . T.filter (/='\r') <$>
   case mt >>= getCharset of
-    Just "UTF-8"      -> return $ UTF8.toText bs
+    Just "UTF-8"      -> utf8ToText fp bs
     Just "ISO-8859-1" -> return $ T.pack $ B8.unpack bs
     Just charset      -> throwError $ PandocUnsupportedCharsetError charset
-    Nothing           -> liftIO $ -- try first as UTF-8, then as latin1
-                          E.catch (return $! UTF8.toText bs)
-                                  (\case
-                                      TSE.DecodeError{} ->
-                                        return $ T.pack $ B8.unpack bs
-                                      e -> E.throwIO e)
+    Nothing           -> catchError
+                           (utf8ToText fp bs)
+                           (\case
+                              PandocUTF8DecodingError{} -> do
+                                report $ NotUTF8Encoded
+                                  (if null fp
+                                      then "input"
+                                      else fp)
+                                return $ T.pack $ B8.unpack bs
+                              e -> throwError e)
 
-readFile' :: MonadIO m => FilePath -> m BL.ByteString
-readFile' "-" = liftIO BL.getContents
-readFile' f   = liftIO $ BL.readFile f
+inputToLazyByteString :: (FilePath, (BS.ByteString, Maybe MimeType))
+                      -> BL.ByteString
+inputToLazyByteString (_, (bs,_)) = BL.fromStrict bs
 
-writeFnBinary :: MonadIO m => FilePath -> BL.ByteString -> m ()
-writeFnBinary "-" = liftIO . BL.putStr
-writeFnBinary f   = liftIO . BL.writeFile (UTF8.encodePath f)
+writeFnBinary :: FilePath -> BL.ByteString -> IO ()
+writeFnBinary "-" = BL.putStr
+writeFnBinary f   = BL.writeFile (UTF8.encodePath f)
 
-writerFn :: MonadIO m => IO.Newline -> FilePath -> Text -> m ()
-writerFn eol "-" = liftIO . UTF8.putStrWith eol
-writerFn eol f   = liftIO . UTF8.writeFileWith eol f
+writerFn :: IO.Newline -> FilePath -> Text -> IO ()
+writerFn eol "-" = UTF8.putStrWith eol
+writerFn eol f   = UTF8.writeFileWith eol f

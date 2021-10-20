@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -28,6 +29,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , applyMacros
   , tokenize
   , tokenizeSources
+  , getInputTokens
   , untokenize
   , untoken
   , totoks
@@ -43,6 +45,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , isNewlineTok
   , isWordTok
   , isArgTok
+  , infile
   , spaces
   , spaces1
   , tokTypeIn
@@ -100,6 +103,9 @@ import qualified Data.IntMap as IntMap
 import qualified Data.Map as M
 import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Maybe (fromMaybe)
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Text as T
 import Text.Pandoc.Builder
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
@@ -144,7 +150,7 @@ data TheoremSpec =
 data LaTeXState = LaTeXState{ sOptions       :: ReaderOptions
                             , sMeta          :: Meta
                             , sQuoteContext  :: QuoteContext
-                            , sMacros        :: M.Map Text Macro
+                            , sMacros        :: NonEmpty (M.Map Text Macro)
                             , sContainers    :: [Text]
                             , sLogMessages   :: [LogMessage]
                             , sIdentifiers   :: Set.Set Text
@@ -171,7 +177,7 @@ defaultLaTeXState :: LaTeXState
 defaultLaTeXState = LaTeXState{ sOptions       = def
                               , sMeta          = nullMeta
                               , sQuoteContext  = NoQuote
-                              , sMacros        = M.empty
+                              , sMacros        = M.empty :| []
                               , sContainers    = []
                               , sLogMessages   = []
                               , sIdentifiers   = Set.empty
@@ -218,8 +224,9 @@ instance HasIncludeFiles LaTeXState where
   dropLatestIncludeFile s = s { sContainers = drop 1 $ sContainers s }
 
 instance HasMacros LaTeXState where
-  extractMacros  st  = sMacros st
-  updateMacros f st  = st{ sMacros = f (sMacros st) }
+  extractMacros  st  = NonEmpty.head $ sMacros st
+  updateMacros f st  = st{ sMacros = f (NonEmpty.head (sMacros st))
+                                     :| NonEmpty.tail (sMacros st) }
 
 instance HasReaderOptions LaTeXState where
   extractReaderOptions = sOptions
@@ -246,29 +253,40 @@ withVerbatimMode parser = do
        updateState $ \st -> st{ sVerbatimMode = False }
        return result
 
-rawLaTeXParser :: (PandocMonad m, HasMacros s, HasReaderOptions s)
+rawLaTeXParser :: (PandocMonad m, HasMacros s, HasReaderOptions s, Show a)
                => [Tok] -> Bool -> LP m a -> LP m a
                -> ParserT Sources s m (a, Text)
 rawLaTeXParser toks retokenize parser valParser = do
   pstate <- getState
   let lstate = def{ sOptions = extractReaderOptions pstate }
-  let lstate' = lstate { sMacros = extractMacros pstate }
+  let lstate' = lstate { sMacros = extractMacros pstate :| [] }
+  let setStartPos = case toks of
+                      Tok pos _ _ : _ -> setPosition pos
+                      _ -> return ()
+  let preparser = setStartPos >> parser
   let rawparser = (,) <$> withRaw valParser <*> getState
-  res' <- lift $ runParserT (snd <$> withRaw parser) lstate "chunk" toks
+  res' <- lift $ runParserT (withRaw (preparser >> getPosition))
+                            lstate "chunk" toks
   case res' of
        Left _    -> mzero
-       Right toks' -> do
+       Right (endpos, toks') -> do
          res <- lift $ runParserT (do when retokenize $ do
                                         -- retokenize, applying macros
-                                        ts <- many (satisfyTok (const True))
+                                        ts <- many anyTok
                                         setInput ts
                                       rawparser)
                         lstate' "chunk" toks'
          case res of
               Left _    -> mzero
               Right ((val, raw), st) -> do
-                updateState (updateMacros (sMacros st <>))
-                void $ count (T.length (untokenize toks')) anyChar
+                updateState (updateMacros ((NonEmpty.head (sMacros st)) <>))
+                let skipTilPos stopPos = do
+                      anyChar
+                      pos <- getPosition
+                      if pos >= stopPos
+                         then return ()
+                         else skipTilPos stopPos
+                skipTilPos endpos
                 let result = untokenize raw
                 -- ensure we end with space if input did, see #4442
                 let result' =
@@ -283,10 +301,10 @@ rawLaTeXParser toks retokenize parser valParser = do
 applyMacros :: (PandocMonad m, HasMacros s, HasReaderOptions s)
             => Text -> ParserT Sources s m Text
 applyMacros s = (guardDisabled Ext_latex_macros >> return s) <|>
-   do let retokenize = untokenize <$> many (satisfyTok (const True))
+   do let retokenize = untokenize <$> many anyTok
       pstate <- getState
       let lstate = def{ sOptions = extractReaderOptions pstate
-                      , sMacros  = extractMacros pstate }
+                      , sMacros  = extractMacros pstate :| [] }
       res <- runParserT retokenize lstate "math" (tokenize "math" s)
       case res of
            Left e   -> Prelude.fail (show e)
@@ -305,6 +323,17 @@ tokenizeSources :: Sources -> [Tok]
 tokenizeSources = concatMap tokenizeSource . unSources
  where
    tokenizeSource (pos, t) = totoks pos t
+
+-- Return tokens from input sources. Ensure that starting position is
+-- correct.
+getInputTokens :: PandocMonad m => ParserT Sources s m [Tok]
+getInputTokens = do
+  pos <- getPosition
+  ss <- getInput
+  return $
+    case ss of
+      Sources [] -> []
+      Sources ((_,t):rest) -> tokenizeSources $ Sources ((pos,t):rest)
 
 tokenize :: SourceName -> Text -> [Tok]
 tokenize sourcename = totoks (initialPos sourcename)
@@ -433,8 +462,13 @@ parseFromToks :: PandocMonad m => LP m a -> [Tok] -> LP m a
 parseFromToks parser toks = do
   oldInput <- getInput
   setInput toks
+  oldpos <- getPosition
+  case toks of
+     Tok pos _ _ : _ -> setPosition pos
+     _ -> return ()
   result <- disablingWithRaw parser
   setInput oldInput
+  setPosition oldpos
   return result
 
 disablingWithRaw :: PandocMonad m => LP m a -> LP m a
@@ -458,7 +492,7 @@ satisfyTok f = do
                   | otherwise = Nothing
         updatePos :: SourcePos -> Tok -> [Tok] -> SourcePos
         updatePos _spos _ (Tok pos _ _ : _) = pos
-        updatePos spos _ []                 = incSourceColumn spos 1
+        updatePos spos (Tok _ _ t)  []      = incSourceColumn spos (T.length t)
 
 doMacros :: PandocMonad m => LP m ()
 doMacros = do
@@ -523,10 +557,10 @@ doMacros' n inp =
     handleMacros n' spos name ts = do
       when (n' > 20)  -- detect macro expansion loops
         $ throwError $ PandocMacroLoop name
-      macros <- sMacros <$> getState
+      (macros :| _ ) <- sMacros <$> getState
       case M.lookup name macros of
            Nothing -> trySpecialMacro name ts
-           Just (Macro expansionPoint argspecs optarg newtoks) -> do
+           Just (Macro _scope expansionPoint argspecs optarg newtoks) -> do
              let getargs' = do
                    args <-
                      (case expansionPoint of
@@ -612,6 +646,9 @@ isWordTok _              = False
 isArgTok :: Tok -> Bool
 isArgTok (Tok _ (Arg _) _) = True
 isArgTok _                 = False
+
+infile :: PandocMonad m => SourceName -> LP m Tok
+infile reference = satisfyTok (\(Tok source _ _) -> (sourceName source) == reference)
 
 spaces :: PandocMonad m => LP m ()
 spaces = skipMany (satisfyTok (tokTypeIn [Comment, Spaces, Newline]))
@@ -716,10 +753,22 @@ primEscape = do
 bgroup :: PandocMonad m => LP m Tok
 bgroup = try $ do
   optional sp
-  symbol '{' <|> controlSeq "bgroup" <|> controlSeq "begingroup"
+  t <- symbol '{' <|> controlSeq "bgroup" <|> controlSeq "begingroup"
+  -- Add a copy of the macro table to the top of the macro stack,
+  -- private for this group. We inherit all the macros defined in
+  -- the parent group.
+  updateState $ \s -> s{ sMacros = NonEmpty.cons (NonEmpty.head (sMacros s))
+                                                 (sMacros s) }
+  return t
+
 
 egroup :: PandocMonad m => LP m Tok
-egroup = symbol '}' <|> controlSeq "egroup" <|> controlSeq "endgroup"
+egroup = do
+  t <- symbol '}' <|> controlSeq "egroup" <|> controlSeq "endgroup"
+  -- remove the group's macro table from the stack
+  updateState $ \s -> s{ sMacros = fromMaybe (sMacros s) $
+      NonEmpty.nonEmpty (NonEmpty.tail (sMacros s)) }
+  return t
 
 grouped :: (PandocMonad m,  Monoid a) => LP m a -> LP m a
 grouped parser = try $ do
@@ -892,12 +941,19 @@ getRawCommand name txt = do
              void $ count 4 braced
            "def" ->
              void $ manyTill anyTok braced
+           "vadjust" ->
+             void (manyTill anyTok braced) <|>
+                void (satisfyTok isPreTok) -- see #7531
            _ | isFontSizeCommand name -> return ()
              | otherwise -> do
                skipopts
                option "" (try dimenarg)
                void $ many braced
   return $ txt <> untokenize rawargs
+
+isPreTok :: Tok -> Bool
+isPreTok (Tok _ Word "pre") = True
+isPreTok _ = False
 
 isDigitTok :: Tok -> Bool
 isDigitTok (Tok _ Word t) = T.all isDigit t
@@ -988,7 +1044,16 @@ resetCaption = updateState $ \st -> st{ sCaption   = Nothing
                                       , sLastLabel = Nothing }
 
 env :: PandocMonad m => Text -> LP m a -> LP m a
-env name p = p <* end_ name
+env name p = do
+  -- environments are groups as far as macros are concerned,
+  -- so we need a local copy of the macro table (see above, bgroup, egroup):
+  updateState $ \s -> s{ sMacros = NonEmpty.cons (NonEmpty.head (sMacros s))
+                                                 (sMacros s) }
+  result <- p
+  updateState $ \s -> s{ sMacros = fromMaybe (sMacros s) $
+      NonEmpty.nonEmpty (NonEmpty.tail (sMacros s)) }
+  end_ name
+  return result
 
 tokWith :: PandocMonad m => LP m Inlines -> LP m Inlines
 tokWith inlineParser = try $ spaces >>

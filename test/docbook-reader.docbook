@@ -102,6 +102,11 @@ sub status {
     print &quot;working&quot;;
 }
 </programlisting>
+    <programlisting linenumbering="numbered">
+sub status {
+    print &quot;working with line numbers&quot;;
+}
+</programlisting>
     <screen>
 % <command>ls</command>
 </screen>
@@ -724,6 +729,9 @@ These should not be escaped:  \$ \\ \&gt; \[ \{
   </para>
   <para>
     More code: <classname>Class</classname> and <type>Type</type>
+  </para>
+  <para>
+    Referencing a man page: <citerefentry><refentrytitle>nix.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
   </para>
   <para>
     <emphasis role="strikethrough">This is

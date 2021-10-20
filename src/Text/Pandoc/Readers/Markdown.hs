@@ -198,6 +198,7 @@ inlinesInBalancedBrackets =
         go openBrackets =
           (() <$ (escapedChar <|>
                 code <|>
+                math <|>
                 rawHtmlInline <|>
                 rawLaTeXInline') >> go openBrackets)
           <|>
@@ -829,7 +830,7 @@ listLineCommon :: PandocMonad m => MarkdownParser m Text
 listLineCommon = T.concat <$> manyTill
               (  many1Char (satisfy $ \c -> c `notElem` ['\n', '<', '`'])
              <|> fmap snd (withRaw code)
-             <|> fmap snd (htmlTag isCommentTag)
+             <|> fmap (renderTags . (:[]) . fst) (htmlTag isCommentTag)
              <|> countChar 1 anyChar
               ) newline
 
@@ -1121,9 +1122,15 @@ rawTeXBlock = do
 rawHtmlBlocks :: PandocMonad m => MarkdownParser m (F Blocks)
 rawHtmlBlocks = do
   (TagOpen tagtype _, raw) <- htmlTag isBlockTag
+  let selfClosing = "/>" `T.isSuffixOf` raw
   -- we don't want '<td>    text' to be a code block:
   skipMany spaceChar
-  indentlevel <- (blankline >> length <$> many (char ' ')) <|> return 0
+  tabStop <- getOption readerTabStop
+  indentlevel <- option 0 $
+                 do blankline
+                    sum <$> many ( (1 <$ char ' ')
+                                   <|>
+                                   (tabStop <$ char '\t') )
   -- try to find closing tag
   -- we set stateInHtmlBlock so that closing tags that can be either block or
   -- inline will not be parsed as inline tags
@@ -1134,7 +1141,9 @@ rawHtmlBlocks = do
                  gobbleAtMostSpaces indentlevel
                  notFollowedBy' closer
                  block
-  contents <- mconcat <$> many block'
+  contents <- if selfClosing
+                 then return mempty
+                 else mconcat <$> many block'
   result <-
     try
     (do gobbleAtMostSpaces indentlevel
@@ -1689,21 +1698,29 @@ strikeout = fmap B.strikeout <$>
 
 superscript :: PandocMonad m => MarkdownParser m (F Inlines)
 superscript = do
-  guardEnabled Ext_superscript
   fmap B.superscript <$> try (do
     char '^'
-    mconcat <$> many1Till (do notFollowedBy spaceChar
-                              notFollowedBy newline
-                              inline) (char '^'))
+    mconcat <$> (try regularSuperscript <|> try mmdShortSuperscript))
+      where regularSuperscript = many1Till (do guardEnabled Ext_superscript
+                                               notFollowedBy spaceChar
+                                               notFollowedBy newline
+                                               inline) (char '^')
+            mmdShortSuperscript = do guardEnabled Ext_short_subsuperscripts
+                                     result <- T.pack <$> many1 alphaNum
+                                     return $ return $ return $ B.str result
 
 subscript :: PandocMonad m => MarkdownParser m (F Inlines)
 subscript = do
-  guardEnabled Ext_subscript
   fmap B.subscript <$> try (do
     char '~'
-    mconcat <$> many1Till (do notFollowedBy spaceChar
-                              notFollowedBy newline
-                              inline) (char '~'))
+    mconcat <$> (try regularSubscript <|> mmdShortSubscript))
+      where regularSubscript = many1Till (do guardEnabled Ext_subscript
+                                             notFollowedBy spaceChar
+                                             notFollowedBy newline
+                                             inline) (char '~')
+            mmdShortSubscript = do guardEnabled Ext_short_subsuperscripts
+                                   result <- T.pack <$> many1 alphaNum
+                                   return $ return $ return $ B.str result
 
 whitespace :: PandocMonad m => MarkdownParser m (F Inlines)
 whitespace = spaceChar >> return <$> (lb <|> regsp) <?> "whitespace"

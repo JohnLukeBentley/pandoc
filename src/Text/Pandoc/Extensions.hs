@@ -74,6 +74,7 @@ data Extension =
     | Ext_angle_brackets_escapable  -- ^ Make < and > escapable
     | Ext_ascii_identifiers   -- ^ ascii-only identifiers for headers;
                               -- presupposes Ext_auto_identifiers
+    | Ext_attributes          -- ^ Generic attribute syntax
     | Ext_auto_identifiers    -- ^ Automatic identifiers for headers
     | Ext_autolink_bare_uris  -- ^ Make all absolute URIs into links
     | Ext_backtick_code_blocks    -- ^ GitHub style ``` code blocks
@@ -105,6 +106,7 @@ data Extension =
                               -- header identifiers; presupposes
                               -- Ext_auto_identifiers
     | Ext_grid_tables         -- ^ Grid tables (pandoc, reST)
+    | Ext_gutenberg           -- ^ Use Project Gutenberg conventions for plain
     | Ext_hard_line_breaks    -- ^ All newlines become hard line breaks
     | Ext_header_attributes   -- ^ Explicit header attributes {#id .class k=v}
     | Ext_ignore_line_breaks  -- ^ Newlines in paragraphs are ignored
@@ -138,9 +140,11 @@ data Extension =
     | Ext_raw_markdown        -- ^ Parse markdown in ipynb as raw markdown
     | Ext_rebase_relative_paths -- ^ Rebase relative image and link paths,
                                 -- relative to directory of containing file
+    | Ext_short_subsuperscripts -- ^ sub-&superscripts w/o closing char (v~i)
     | Ext_shortcut_reference_links -- ^ Shortcut reference links
     | Ext_simple_tables       -- ^ Pandoc-style simple tables
     | Ext_smart               -- ^ "Smart" quotes, apostrophes, ellipses, dashes
+    | Ext_sourcepos           -- ^ Include source position attributes
     | Ext_space_in_atx_header -- ^ Require space between # and header text
     | Ext_spaced_reference_links -- ^ Allow space between two parts of ref link
     | Ext_startnum            -- ^ Make start number of ordered list significant
@@ -156,9 +160,6 @@ data Extension =
     | Ext_xrefs_name          -- ^ Use xrefs with names
     | Ext_xrefs_number        -- ^ Use xrefs with numbers
     | Ext_yaml_metadata_block -- ^ YAML metadata block
-    | Ext_gutenberg           -- ^ Use Project Gutenberg conventions for plain
-    | Ext_attributes          -- ^ Generic attribute syntax
-    | Ext_sourcepos           -- ^ Include source position attributes
     deriving (Show, Read, Enum, Eq, Ord, Bounded, Data, Typeable, Generic)
 
 -- | Extensions to be used with pandoc-flavored markdown.
@@ -286,14 +287,9 @@ multimarkdownExtensions = extensionsFromList
   , Ext_auto_identifiers
   , Ext_mmd_header_identifiers
   , Ext_implicit_figures
-  -- Note: MMD's syntax for superscripts and subscripts
-  -- is a bit more permissive than pandoc's, allowing
-  -- e^2 and a~1 instead of e^2^ and a~1~, so even with
-  -- these options we don't have full support for MMD
-  -- superscripts and subscripts, but there's no reason
-  -- not to include these:
-  , Ext_superscript
+  , Ext_short_subsuperscripts
   , Ext_subscript
+  , Ext_superscript
   , Ext_backtick_code_blocks
   , Ext_spaced_reference_links
   -- So far only in dev version of mmd:
@@ -357,6 +353,7 @@ getDefaultExtensions "gfm"             = extensionsFromList
   , Ext_task_lists
   , Ext_emoji
   , Ext_yaml_metadata_block
+  , Ext_footnotes
   ]
 getDefaultExtensions "commonmark"      = extensionsFromList
                                           [Ext_raw_html]
@@ -464,6 +461,7 @@ getAllExtensions f = universalExtensions <> getAll f
        , Ext_gutenberg
        , Ext_smart
        , Ext_literate_haskell
+       , Ext_short_subsuperscripts
        , Ext_rebase_relative_paths
        ]
   getAll "markdown_strict"   = allMarkdownExtensions
@@ -475,6 +473,7 @@ getAllExtensions f = universalExtensions <> getAll f
     [ Ext_raw_markdown ]
   getAll "docx"            = autoIdExtensions <> extensionsFromList
     [ Ext_empty_paragraphs
+    , Ext_native_numbering
     , Ext_styles
     ]
   getAll "opendocument"    = extensionsFromList

@@ -97,7 +97,7 @@ List of all DocBook tags, with [x] indicating implemented,
 [x] chapterinfo - Meta-information for a Chapter
 [ ] citation - An inline bibliographic reference to another published work
 [ ] citebiblioid - A citation of a bibliographic identifier
-[ ] citerefentry - A citation to a reference page
+[x] citerefentry - A citation to a reference page
 [ ] citetitle - The title of a cited work
 [ ] city - The name of a city in an address
 [x] classname - The name of a class, in the object-oriented programming sense
@@ -741,9 +741,9 @@ getMediaobject e = do
   figTitle <- gets dbFigureTitle
   ident <- gets dbFigureId
   (imageUrl, attr) <-
-    case filterChild (named "imageobject") e of
-      Nothing  -> return (mempty, nullAttr)
-      Just z   -> case filterChild (named "imagedata") z of
+    case filterElements (named "imageobject") e of
+      []  -> return (mempty, nullAttr)
+      (z:_) -> case filterChild (named "imagedata") z of
                     Nothing -> return (mempty, nullAttr)
                     Just i  -> let atVal a = attrValue a i
                                    w = case atVal "width" of
@@ -907,6 +907,7 @@ parseBlock (Elem e) =
            let classes' = case attrValue "language" e of
                                 "" -> []
                                 x  -> [x]
+                ++ ["numberLines" | attrValue "linenumbering" e == "numbered"]
            return $ codeBlockWith (attrValue "id" e, classes', [])
                   $ trimNl $ strContentRecursive e
          parseBlockquote = do
@@ -1112,6 +1113,10 @@ parseInline (Elem e) =
         "segmentedlist" -> segmentedList
         "classname" -> codeWithLang
         "code" -> codeWithLang
+        "citerefentry" -> do
+             let title = maybe mempty strContent $ filterChild (named "refentrytitle") e
+             let manvolnum = maybe mempty (\el -> "(" <> strContent el <> ")") $ filterChild (named "manvolnum") e
+             return $ codeWith ("",["citerefentry"],[]) (title <> manvolnum)
         "filename" -> codeWithLang
         "envar" -> codeWithLang
         "literal" -> codeWithLang

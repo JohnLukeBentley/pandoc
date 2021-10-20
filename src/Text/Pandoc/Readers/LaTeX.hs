@@ -136,8 +136,7 @@ rawLaTeXBlock :: (PandocMonad m, HasMacros s, HasReaderOptions s)
               => ParserT Sources s m Text
 rawLaTeXBlock = do
   lookAhead (try (char '\\' >> letter))
-  inp <- getInput
-  let toks = tokenizeSources inp
+  toks <- getInputTokens
   snd <$> (rawLaTeXParser toks False (macroDef (const mempty)) blocks
       <|> rawLaTeXParser toks True
              (do choice (map controlSeq
@@ -167,8 +166,7 @@ rawLaTeXInline :: (PandocMonad m, HasMacros s, HasReaderOptions s)
                => ParserT Sources s m Text
 rawLaTeXInline = do
   lookAhead (try (char '\\' >> letter))
-  inp <- getInput
-  let toks = tokenizeSources inp
+  toks <- getInputTokens
   raw <- snd <$>
           (   rawLaTeXParser toks True
               (mempty <$ (controlSeq "input" >> skipMany rawopt >> braced))
@@ -182,8 +180,7 @@ rawLaTeXInline = do
 inlineCommand :: PandocMonad m => ParserT Sources ParserState m Inlines
 inlineCommand = do
   lookAhead (try (char '\\' >> letter))
-  inp <- getInput
-  let toks = tokenizeSources inp
+  toks <- getInputTokens
   fst <$> rawLaTeXParser toks True (inlineEnvironment <|> inlineCommand')
           inlines
 
@@ -893,7 +890,7 @@ blockCommands = M.fromList
          addMeta "bibliography" . splitBibs . untokenize))
    , ("addbibresource", mempty <$ (skipopts *> braced >>=
          addMeta "bibliography" . splitBibs . untokenize))
-   , ("endinput", mempty <$ skipMany anyTok)
+   , ("endinput", mempty <$ skipSameFileToks)
    -- includes
    , ("lstinputlisting", inputListing)
    , ("inputminted", inputMinted)
@@ -924,6 +921,10 @@ blockCommands = M.fromList
    , ("epigraph", epigraph)
    ]
 
+skipSameFileToks :: PandocMonad m => LP m ()
+skipSameFileToks = do
+    pos <- getPosition
+    skipMany $ infile (sourceName pos)
 
 environments :: PandocMonad m => M.Map Text (LP m Blocks)
 environments = M.union (tableEnvironments blocks inline) $
@@ -966,6 +967,7 @@ environments = M.union (tableEnvironments blocks inline) $
    , ("toggletrue", braced >>= setToggle True)
    , ("togglefalse", braced >>= setToggle False)
    , ("iftoggle", try $ ifToggle >> block)
+   , ("CSLReferences", braced >> braced >> env "CSLReferences" blocks)
    ]
 
 filecontents :: PandocMonad m => LP m Blocks

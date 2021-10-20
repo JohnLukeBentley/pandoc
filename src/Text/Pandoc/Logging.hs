@@ -76,6 +76,7 @@ data LogMessage =
   | InlineNotRendered Inline
   | BlockNotRendered Block
   | DocxParserWarning Text
+  | PowerpointTemplateWarning Text
   | IgnoredIOError Text
   | CouldNotFetchResource Text Text
   | CouldNotDetermineImageSize Text Text
@@ -104,6 +105,7 @@ data LogMessage =
   | ATXHeadingInLHS Int Text
   | EnvironmentVariableUndefined Text
   | DuplicateAttribute Text Text
+  | NotUTF8Encoded FilePath
   deriving (Show, Eq, Data, Ord, Typeable, Generic)
 
 instance ToJSON LogMessage where
@@ -174,6 +176,8 @@ instance ToJSON LogMessage where
            ["contents" .= toJSON bl]
       DocxParserWarning s ->
            ["contents" .= s]
+      PowerpointTemplateWarning s ->
+           ["contents" .= s]
       IgnoredIOError s ->
            ["contents" .= s]
       CouldNotFetchResource fp s ->
@@ -241,6 +245,8 @@ instance ToJSON LogMessage where
       DuplicateAttribute attr val ->
            ["attribute" .= attr
            ,"value" .= val]
+      NotUTF8Encoded src ->
+           ["source" .= src]
 
 showPos :: SourcePos -> Text
 showPos pos = Text.pack $ sn ++ "line " ++
@@ -291,6 +297,8 @@ showLogMessage msg =
          "Not rendering " <> Text.pack (show bl)
        DocxParserWarning s ->
          "Docx parser warning: " <> s
+       PowerpointTemplateWarning s ->
+         "Powerpoint template warning: " <> s
        IgnoredIOError s ->
          "IO Error (ignored): " <> s
        CouldNotFetchResource fp s ->
@@ -365,6 +373,9 @@ showLogMessage msg =
          "Undefined environment variable " <> var <> " in defaults file."
        DuplicateAttribute attr val ->
          "Ignoring duplicate attribute " <> attr <> "=" <> tshow val <> "."
+       NotUTF8Encoded src ->
+         Text.pack src <>
+           " is not UTF-8 encoded: falling back to latin1."
 
 messageVerbosity :: LogMessage -> Verbosity
 messageVerbosity msg =
@@ -386,6 +397,7 @@ messageVerbosity msg =
        InlineNotRendered{}           -> INFO
        BlockNotRendered{}            -> INFO
        DocxParserWarning{}           -> INFO
+       PowerpointTemplateWarning{}   -> WARNING
        IgnoredIOError{}              -> WARNING
        CouldNotFetchResource{}       -> WARNING
        CouldNotDetermineImageSize{}  -> WARNING
@@ -414,3 +426,4 @@ messageVerbosity msg =
        ATXHeadingInLHS{}             -> WARNING
        EnvironmentVariableUndefined{}-> WARNING
        DuplicateAttribute{}          -> WARNING
+       NotUTF8Encoded{}              -> WARNING

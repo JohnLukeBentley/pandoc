@@ -466,14 +466,12 @@ includeDirective top fields body = do
   let classes =  maybe [] T.words (lookup "class" fields)
   let ident = maybe "" trimr $ lookup "name" fields
   let parser =
-       case lookup "code" fields of
+       case lookup "code" fields `mplus` lookup "literal" fields of
          Just lang ->
            (codeblock ident classes fields (trimr lang) False
             . sourcesToText) <$> getInput
-         Nothing   ->
-           case lookup "literal" fields of
-             Just _  -> B.rawBlock "rst" . sourcesToText <$> getInput
-             Nothing -> parseBlocks
+         Nothing   -> parseBlocks
+  let isLiteral = isJust (lookup "code" fields `mplus` lookup "literal" fields)
   let selectLines =
         (case trim <$> lookup "end-before" fields of
                          Just patt -> takeWhile (not . (patt `T.isInfixOf`))
@@ -482,8 +480,11 @@ includeDirective top fields body = do
                          Just patt -> drop 1 .
                                         dropWhile (not . (patt `T.isInfixOf`))
                          Nothing   -> id)
+
   let toStream t =
-        toSources [(f, T.unlines . selectLines . T.lines $ t)]
+        Sources [(initialPos f,
+                   (T.unlines . selectLines . T.lines $ t) <>
+                    if isLiteral then mempty else "\n")]  -- see #7436
   currentDir <- takeDirectory . sourceName <$> getPosition
   insertIncludedFile parser toStream [currentDir] f startLine endLine
 
@@ -1154,10 +1155,11 @@ referenceNames = do
   let rn = try $ do
              string ".. _"
              ref <- quotedReferenceName
-                  <|> manyChar (  noneOf ":\n"
+                  <|> manyChar (  noneOf "\\:\n"
                               <|> try (char '\n' <*
                                        string "   " <*
                                        notFollowedBy blankline)
+                              <|> try (char '\\' *> char ':')
                               <|> try (char ':' <* lookAhead alphaNum)
                                )
              char ':'

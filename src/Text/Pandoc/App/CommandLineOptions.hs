@@ -188,6 +188,11 @@ options =
                   (\opt -> return opt { optFileScope = True }))
                  "" -- "Parse input files before combining"
 
+    , Option "" ["sandbox"]
+                 (NoArg
+                  (\opt -> return opt { optSandbox = True }))
+                 ""
+
     , Option "s" ["standalone"]
                  (NoArg
                   (\opt -> return opt { optStandalone = True }))
@@ -332,14 +337,8 @@ options =
 
     , Option "" ["syntax-definition"]
                 (ReqArg
-                 (\arg opt -> do
-                   let tr c d = map (\x -> if x == c then d else x)
-                   let arg' = case arg of -- see #4836
-                                   -- HXT confuses Windows path with URI
-                                   _:':':'\\':_ ->
-                                       "file:///" ++ tr '\\' '/' arg
-                                   _ -> normalizePath arg
-                   return opt{ optSyntaxDefinitions = arg' :
+                 (\arg opt ->
+                   return opt{ optSyntaxDefinitions = normalizePath arg :
                                 optSyntaxDefinitions opt })
                  "FILE")
                 "" -- "Syntax definition (xml) file"
@@ -576,10 +575,10 @@ options =
                  (ReqArg
                   (\arg opt ->
                       case safeStrRead arg of
-                           Just t | t >= 1 && t <= 6 ->
+                           Just t | t >= 0 && t <= 6 ->
                                     return opt { optSlideLevel = Just t }
                            _      -> E.throwIO $ PandocOptionError
-                                    "slide level must be a number between 1 and 6")
+                                    "slide level must be a number between 0 and 6")
                  "NUMBER")
                  "" -- "Force header level for slides"
 

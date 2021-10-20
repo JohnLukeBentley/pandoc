@@ -32,7 +32,6 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Lazy as TL
-import Network.HTTP (urlEncode)
 import System.FilePath (takeExtension, takeFileName, makeRelative)
 import Text.HTML.TagSoup (Tag (TagOpen), fromAttrib, parseTags)
 import Text.Pandoc.Builder (fromList, setMeta)
@@ -45,6 +44,7 @@ import Text.Pandoc.Error
 import Text.Pandoc.ImageSize
 import Text.Pandoc.Logging
 import Text.Pandoc.MIME (MimeType, extensionFromMimeType, getMimeType)
+import Text.Pandoc.Network.HTTP (urlEncode)
 import Text.Pandoc.Options (EPUBVersion (..), HTMLMathMethod (..),
                             ObfuscationMethod (NoObfuscation), WrapOption (..),
                             WriterOptions (..))
@@ -79,7 +79,7 @@ data EPUBMetadata = EPUBMetadata{
   , epubLanguage            :: Text
   , epubCreator             :: [Creator]
   , epubContributor         :: [Creator]
-  , epubSubject             :: [Text]
+  , epubSubject             :: [Subject]
   , epubDescription         :: Maybe Text
   , epubType                :: Maybe Text
   , epubFormat              :: Maybe Text
@@ -120,6 +120,12 @@ data Title = Title{
   } deriving Show
 
 data ProgressionDirection = LTR | RTL deriving Show
+
+data Subject = Subject{
+    subjectText      :: Text
+  , subjectAuthority :: Maybe Text
+  , subjectTerm      :: Maybe Text
+  } deriving Show
 
 dcName :: Text -> QName
 dcName n = QName n Nothing (Just "dc")
@@ -232,7 +238,11 @@ addMetadataFromXML e@(Element (QName name _ (Just "dc")) attrs _ _) md
                        , creatorRole = getAttr "role"
                        , creatorFileAs = getAttr "file-as"
                        } : epubContributor md }
-  | name == "subject" = md{ epubSubject = strContent e : epubSubject md }
+  | name == "subject" = md{ epubSubject =
+              Subject  { subjectText = strContent e
+                       , subjectAuthority = getAttr "authority"
+                       , subjectTerm = getAttr "term"
+                       } : epubSubject md }
   | name == "description" = md { epubDescription = Just $ strContent e }
   | name == "type" = md { epubType = Just $ strContent e }
   | name == "format" = md { epubFormat = Just $ strContent e }
@@ -313,12 +323,13 @@ getDate s meta = getList s meta handleMetaValue
         handleMetaValue mv = Date { dateText = fromMaybe "" $ normalizeDate' $ metaValueToString mv
                                   , dateEvent = Nothing }
 
-simpleList :: T.Text -> Meta -> [Text]
-simpleList s meta =
-  case lookupMeta s meta of
-       Just (MetaList xs) -> map metaValueToString xs
-       Just x             -> [metaValueToString x]
-       Nothing            -> []
+getSubject :: T.Text -> Meta -> [Subject]
+getSubject s meta = getList s meta handleMetaValue
+  where handleMetaValue (MetaMap m) =
+           Subject{ subjectText = maybe "" metaValueToString $ M.lookup "text" m
+                  , subjectAuthority = metaValueToString <$> M.lookup "authority" m
+                  , subjectTerm = metaValueToString <$> M.lookup "term" m }
+        handleMetaValue mv = Subject (metaValueToString mv) Nothing Nothing
 
 metadataFromMeta :: WriterOptions -> Meta -> EPUBMetadata
 metadataFromMeta opts meta = EPUBMetadata{
@@ -352,7 +363,7 @@ metadataFromMeta opts meta = EPUBMetadata{
            lookupMeta "language" meta `mplus` lookupMeta "lang" meta
         creators = getCreator "creator" meta
         contributors = getCreator "contributor" meta
-        subjects = simpleList "subject" meta
+        subjects = getSubject "subject" meta
         description = metaValueToString <$> lookupMeta "description" meta
         epubtype = metaValueToString <$> lookupMeta "type" meta
         format = metaValueToString <$> lookupMeta "format" meta
@@ -659,7 +670,7 @@ pandocToEPUB version opts doc = do
                                    "contributors", "other-credits",
                                    "errata", "revision-history",
                                    "titlepage", "halftitlepage", "seriespage",
-                                   "foreword", "preface",
+                                   "foreword", "preface", "frontispiece",
                                    "seriespage", "titlepage"]
                backMatterTypes = ["appendix", "colophon", "bibliography",
                                   "index"]
@@ -974,7 +985,7 @@ metadataElement version md currentTime =
                        epubCreator md
         contributorNodes = withIds "epub-contributor"
                            (toCreatorNode "contributor") $ epubContributor md
-        subjectNodes = map (dcTag "subject") $ epubSubject md
+        subjectNodes = withIds "subject" toSubjectNode $ epubSubject md
         descriptionNodes = maybe [] (dcTag' "description") $ epubDescription md
         typeNodes = maybe [] (dcTag' "type") $ epubType md
         formatNodes = maybe [] (dcTag' "format") $ epubFormat md
@@ -1046,6 +1057,16 @@ metadataElement version md currentTime =
              (("id",id') :
                 maybe [] (\x -> [("opf:event",x)]) (dateEvent date)) $
                  dateText date]
+        toSubjectNode id' subject
+          | version == EPUB2 = [dcNode "subject" !
+            [("id",id')] $ subjectText subject]
+          | otherwise = (dcNode "subject" ! [("id",id')] $ subjectText subject)
+            : maybe [] (\x -> (unode "meta" !
+                    [("refines", "#" <> id'),("property","authority")] $ x) :
+                    maybe [] (\y -> [unode "meta" !
+                         [("refines", "#" <> id'),("property","term")] $ y])
+                         (subjectTerm subject))
+                    (subjectAuthority subject)
         schemeToOnix :: Text -> Text
         schemeToOnix "ISBN-10"              = "02"
         schemeToOnix "GTIN-13"              = "03"
@@ -1131,12 +1152,13 @@ transformInline  :: PandocMonad m
                  => WriterOptions
                  -> Inline
                  -> E m Inline
-transformInline _opts (Image attr lab (src,tit)) = do
+transformInline _opts (Image attr@(_,_,kvs) lab (src,tit))
+  | isNothing (lookup "external" kvs) = do
     newsrc <- modifyMediaRef $ T.unpack src
     return $ Image attr lab ("../" <> newsrc, tit)
 transformInline opts x@(Math t m)
   | WebTeX url <- writerHTMLMathMethod opts = do
-    newsrc <- modifyMediaRef (T.unpack url <> urlEncode (T.unpack m))
+    newsrc <- modifyMediaRef (T.unpack (url <> urlEncode m))
     let mathclass = if t == DisplayMath then "display" else "inline"
     return $ Span ("",["math",mathclass],[])
                 [Image nullAttr [x] ("../" <> newsrc, "")]

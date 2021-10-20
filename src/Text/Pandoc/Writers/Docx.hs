@@ -36,7 +36,9 @@ import Data.Time.Clock.POSIX
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import Skylighting
 import Text.Collate.Lang (renderLang)
-import Text.Pandoc.Class.PandocMonad (PandocMonad, report, toLang, translateTerm)
+import Text.Pandoc.Class (PandocMonad, report, toLang, translateTerm,
+                           getMediaBag)
+import Text.Pandoc.MediaBag (lookupMedia, MediaItem(..))
 import qualified Text.Pandoc.Translations as Term
 import qualified Text.Pandoc.Class.PandocMonad as P
 import Data.Time
@@ -175,6 +177,7 @@ writeDocx opts doc = do
   let initialSt = defaultWriterState {
           stStyleMaps  = styleMaps
         , stTocTitle   = tocTitle
+        , stCurId      = 20
         }
 
   let isRTLmeta = case lookupMeta "dir" meta of
@@ -783,8 +786,6 @@ rStyleM styleName = do
   return $ mknode "w:rStyle" [("w:val", fromStyleId sty')] ()
 
 getUniqueId :: (PandocMonad m) => WS m Text
--- the + 20 is to ensure that there are no clashes with the rIds
--- already in word/document.xml.rel
 getUniqueId = do
   n <- gets stCurId
   modify $ \st -> st{stCurId = n + 1}
@@ -853,11 +854,14 @@ blockToOpenXML' opts (Plain lst) = do
      then withParaProp prop block
      else block
 -- title beginning with fig: indicates that the image is a figure
-blockToOpenXML' opts (Para [Image attr alt (src,T.stripPrefix "fig:" -> Just tit)]) = do
+blockToOpenXML' opts (Para [Image attr@(imgident,_,_) alt
+                             (src,T.stripPrefix "fig:" -> Just tit)]) = do
   setFirstPara
   fignum <- gets stNextFigureNum
   unless (null alt) $ modify $ \st -> st{ stNextFigureNum = fignum + 1 }
-  let figid = "fig" <> tshow fignum
+  let refid = if T.null imgident
+                     then "ref_fig" <> tshow fignum
+                     else "ref_" <> imgident
   figname <- translateTerm Term.Figure
   prop <- pStyleM $
         if null alt
@@ -869,14 +873,17 @@ blockToOpenXML' opts (Para [Image attr alt (src,T.stripPrefix "fig:" -> Just tit
                     then return []
                     else withParaPropM (pStyleM "Image Caption")
                          $ blockToOpenXML opts
-                            (Para $ Span (figid,[],[])
-                               [Str (figname <> "\160"),
-                                RawInline (Format "openxml")
-                                ("<w:fldSimple w:instr=\"SEQ Figure"
-                                <> " \\* ARABIC \"><w:r><w:t>"
-                                <> tshow fignum
-                                <> "</w:t></w:r></w:fldSimple>"),
-                                Str ":", Space] : alt)
+                         $ Para
+                         $ if isEnabled Ext_native_numbering opts
+                              then Span (refid,[],[])
+                                          [Str (figname <> "\160"),
+                                           RawInline (Format "openxml")
+                                           ("<w:fldSimple w:instr=\"SEQ Figure"
+                                           <> " \\* ARABIC \"><w:r><w:t>"
+                                           <> tshow fignum
+                                           <> "</w:t></w:r></w:fldSimple>"),
+                                           Str ":", Space] : alt
+                              else alt
   return $
     Elem (mknode "w:p" [] (map Elem paraProps ++ contents))
     : captionNode
@@ -922,7 +929,8 @@ blockToOpenXML' _ HorizontalRule = do
                        ("o:hralign","center"),
                        ("o:hrstd","t"),("o:hr","t")] () ]
 blockToOpenXML' opts (Table attr caption colspecs thead tbodies tfoot) =
-  tableToOpenXML (blocksToOpenXML opts)
+  tableToOpenXML opts
+                 (blocksToOpenXML opts)
                  (Grid.toTable attr caption colspecs thead tbodies tfoot)
 blockToOpenXML' opts el
   | BulletList lst <- el = addOpenXMLList BulletMarker lst
@@ -1230,7 +1238,42 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
   imgs <- gets stImages
   let
     stImage = M.lookup (T.unpack src) imgs
-    generateImgElt (ident, _, _, img) =
+    generateImgElt (ident, _fp, mt, img) = do
+      docprid <- getUniqueId
+      nvpicprid <- getUniqueId
+      (blipAttrs, blipContents) <-
+        case T.takeWhile (/=';') <$> mt of
+          Just "image/svg+xml" -> do
+            -- get fallback png
+            mediabag <- getMediaBag
+            mbFallback <-
+              case lookupMedia (T.unpack (src <> ".png")) mediabag of
+                Just item -> do
+                  id' <- T.unpack . ("rId" <>) <$> getUniqueId
+                  let fp' = "media/" <> id' <> ".png"
+                  let imgdata = (id',
+                                 fp',
+                                 Just (mediaMimeType item),
+                                 BL.toStrict $ mediaContents item)
+                  modify $ \st -> st { stImages =
+                            M.insert fp' imgdata $ stImages st }
+                  return $ Just id'
+                Nothing -> return Nothing
+            let extLst = mknode "a:extLst" []
+                            [ mknode "a:ext"
+                              [("uri","{28A0092B-C50C-407E-A947-70E740481C1C}")]
+                              [ mknode "a14:useLocalDpi"
+                                [("xmlns:a14","http://schemas.microsoft.com/office/drawing/2010/main"),
+                                 ("val","0")] () ]
+                            , mknode "a:ext"
+                              [("uri","{96DAC541-7B7A-43D3-8B79-37D633B846F1}")]
+                              [ mknode "asvg:svgBlip"
+                                [("xmlns:asvg", "http://schemas.microsoft.com/office/drawing/2016/SVG/main"),
+                                 ("r:embed",T.pack ident)] () ]
+                            ]
+            return (maybe [] (\id'' -> [("r:embed", T.pack id'')]) mbFallback,
+                    [extLst])
+          _ -> return ([("r:embed", T.pack ident)], [])
       let
         (xpt,ypt) = desiredSizeInPoints opts attr
                (either (const def) id (imageSize opts img))
@@ -1242,10 +1285,12 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
                                              ,("noChangeAspect","1")] ()
         nvPicPr  = mknode "pic:nvPicPr" []
                         [ mknode "pic:cNvPr"
-                            [("descr",src),("id","0"),("name","Picture")] ()
+                            [("descr",src)
+                            ,("id", nvpicprid)
+                            ,("name","Picture")] ()
                         , cNvPicPr ]
         blipFill = mknode "pic:blipFill" []
-          [ mknode "a:blip" [("r:embed",T.pack ident)] ()
+          [ mknode "a:blip" blipAttrs blipContents
           , mknode "a:stretch" [] $
               mknode "a:fillRect" [] ()
           ]
@@ -1279,16 +1324,15 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
               , mknode "wp:docPr"
                 [ ("descr", stringify alt)
                 , ("title", title)
-                , ("id","1")
+                , ("id", docprid)
                 , ("name","Picture")
                 ] ()
               , graphic
               ]
-      in
-        imgElt
+      return [Elem imgElt]
 
   wrapBookmark imgident =<< case stImage of
-    Just imgData -> return [Elem $ generateImgElt imgData]
+    Just imgData -> generateImgElt imgData
     Nothing -> ( do --try
       (img, mt) <- P.fetchItem src
       ident <- ("rId" <>) <$> getUniqueId
@@ -1317,7 +1361,7 @@ inlineToOpenXML' opts (Image attr@(imgident, _, _) alt (src, title)) = do
          else do
            -- insert mime type to use in constructing [Content_Types].xml
            modify $ \st -> st { stImages = M.insert (T.unpack src) imgData $ stImages st }
-           return [Elem $ generateImgElt imgData]
+           generateImgElt imgData
       )
       `catchError` ( \e -> do
         report $ CouldNotFetchResource src $ T.pack (show e)

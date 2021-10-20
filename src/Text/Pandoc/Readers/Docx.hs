@@ -246,8 +246,8 @@ runToText _                = ""
 
 parPartToText :: ParPart -> T.Text
 parPartToText (PlainRun run)             = runToText run
-parPartToText (InternalHyperLink _ runs) = T.concat $ map runToText runs
-parPartToText (ExternalHyperLink _ runs) = T.concat $ map runToText runs
+parPartToText (InternalHyperLink _ children) = T.concat $ map parPartToText children
+parPartToText (ExternalHyperLink _ children) = T.concat $ map parPartToText children
 parPartToText _                          = ""
 
 blacklistedCharStyles :: [CharStyleName]
@@ -322,6 +322,7 @@ runToInlines (InlineDrawing fp title alt bs ext) = do
   (lift . lift) $ P.insertMedia fp Nothing bs
   return $ imageWith (extentToAttr ext) (T.pack fp) title $ text alt
 runToInlines InlineChart = return $ spanWith ("", ["chart"], []) $ text "[CHART]"
+runToInlines InlineDiagram = return $ spanWith ("", ["diagram"], []) $ text "[DIAGRAM]"
 
 extentToAttr :: Extent -> Attr
 extentToAttr (Just (w, h)) =
@@ -434,18 +435,21 @@ parPartToInlines' (Drawing fp title alt bs ext) = do
   return $ imageWith (extentToAttr ext) (T.pack fp) title $ text alt
 parPartToInlines' Chart =
   return $ spanWith ("", ["chart"], []) $ text "[CHART]"
-parPartToInlines' (InternalHyperLink anchor runs) = do
-  ils <- smushInlines <$> mapM runToInlines runs
+parPartToInlines' Diagram =
+  return $ spanWith ("", ["diagram"], []) $ text "[DIAGRAM]"
+parPartToInlines' (InternalHyperLink anchor children) = do
+  ils <- smushInlines <$> mapM parPartToInlines' children
   return $ link ("#" <> anchor) "" ils
-parPartToInlines' (ExternalHyperLink target runs) = do
-  ils <- smushInlines <$> mapM runToInlines runs
+parPartToInlines' (ExternalHyperLink target children) = do
+  ils <- smushInlines <$> mapM parPartToInlines' children
   return $ link target "" ils
 parPartToInlines' (PlainOMath exps) =
   return $ math $ writeTeX exps
-parPartToInlines' (Field info runs) =
+parPartToInlines' (Field info children) =
   case info of
-    HyperlinkField url -> parPartToInlines' $ ExternalHyperLink url runs
-    UnknownField -> smushInlines <$> mapM runToInlines runs
+    HyperlinkField url -> parPartToInlines' $ ExternalHyperLink url children
+    PagerefField fieldAnchor True -> parPartToInlines' $ InternalHyperLink fieldAnchor children
+    _ -> smushInlines <$> mapM parPartToInlines' children
 parPartToInlines' NullParPart = return mempty
 
 isAnchorSpan :: Inline -> Bool
@@ -532,34 +536,36 @@ trimSps (Many ils) = Many $ Seq.dropWhileL isSp $Seq.dropWhileR isSp ils
 extraAttr :: (Eq (StyleName a), HasStyleName a) => a -> Attr
 extraAttr s = ("", [], [("custom-style", fromStyleName $ getStyleName s)])
 
-parStyleToTransform :: PandocMonad m => ParagraphStyle -> DocxContext m (Blocks -> Blocks)
-parStyleToTransform pPr = case pStyle pPr of
-  c@(getStyleName -> styleName):cs
-    | styleName `elem` divsToKeep -> do
-        let pPr' = pPr { pStyle = cs }
-        transform <- parStyleToTransform pPr'
-        return $ divWith ("", [normalizeToClassName styleName], []) . transform
-    | styleName `elem` listParagraphStyles -> do
-        let pPr' = pPr { pStyle = cs, indentation = Nothing}
-        transform <- parStyleToTransform pPr'
-        return $ divWith ("", [normalizeToClassName styleName], []) . transform
-    | otherwise -> do
-        let pPr' = pPr { pStyle = cs }
-        transform <- parStyleToTransform pPr'
-        styles <- asks (isEnabled Ext_styles . docxOptions)
-        return $
-          (if styles then divWith (extraAttr c) else id)
-          . (if isBlockQuote c then blockQuote else id)
-          . transform
-  []
-    | Just left <- indentation pPr >>= leftParIndent -> do
-        let pPr' = pPr { indentation = Nothing }
-            hang = fromMaybe 0 $ indentation pPr >>= hangingParIndent
-        transform <- parStyleToTransform pPr'
-        return $ if (left - hang) > 0
-                 then blockQuote . transform
-                 else transform
-    | otherwise -> return id
+paragraphStyleToTransform :: PandocMonad m => ParagraphStyle -> DocxContext m (Blocks -> Blocks)
+paragraphStyleToTransform pPr =
+  let stylenames = map getStyleName (pStyle pPr)
+      transform = if (`elem` listParagraphStyles) `any` stylenames || relativeIndent pPr <= 0
+                  then id
+                  else blockQuote
+  in do
+    extStylesEnabled <- asks (isEnabled Ext_styles . docxOptions)
+    return $ foldr (\parStyle transform' ->
+        (parStyleToTransform extStylesEnabled parStyle) . transform'
+      ) transform (pStyle pPr)
+
+parStyleToTransform :: Bool -> ParStyle -> Blocks -> Blocks
+parStyleToTransform extStylesEnabled parStyle@(getStyleName -> styleName)
+  | (styleName `elem` divsToKeep) || (styleName `elem` listParagraphStyles) =
+      divWith ("", [normalizeToClassName styleName], [])
+  | otherwise =
+      (if extStylesEnabled then divWith (extraAttr parStyle) else id)
+      . (if isBlockQuote parStyle then blockQuote else id)
+
+-- The relative indent is the indentation minus the indentation of the parent style.
+-- This tells us whether this paragraph in particular was indented more and thus
+-- should be considered a block quote.
+relativeIndent :: ParagraphStyle -> Integer
+relativeIndent pPr =
+  let pStyleLeft = fromMaybe 0 $ pStyleIndentation pPr >>= leftParIndent
+      pStyleHang = fromMaybe 0 $ pStyleIndentation pPr >>= hangingParIndent
+      left = fromMaybe pStyleLeft $ indentation pPr >>= leftParIndent
+      hang = fromMaybe pStyleHang $ indentation pPr >>= hangingParIndent
+  in (left - hang) - (pStyleLeft - pStyleHang)
 
 normalizeToClassName :: (FromStyleName a) => a -> T.Text
 normalizeToClassName = T.map go . fromStyleName
@@ -578,7 +584,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
       local (\s -> s{ docxInBidi = True })
         (bodyPartToBlocks (Paragraph pPr' parparts))
   | isCodeDiv pPr = do
-      transform <- parStyleToTransform pPr
+      transform <- paragraphStyleToTransform pPr
       return $
         transform $
         codeBlock $
@@ -605,7 +611,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                           else prevParaIls <> space) <> ils'
                   handleInsertion = do
                     modify $ \s -> s {docxPrevPara = mempty}
-                    transform <- parStyleToTransform pPr'
+                    transform <- paragraphStyleToTransform pPr'
                     return $ transform $ paraOrPlain ils''
               opts <- asks docxOptions
               case (pChange pPr', readerTrackChanges opts) of
@@ -620,7 +626,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                    , AllChanges) -> do
                       let attr = ("", ["paragraph-insertion"], addAuthorAndDate cAuthor cDate)
                           insertMark = spanWith attr mempty
-                      transform <- parStyleToTransform pPr'
+                      transform <- paragraphStyleToTransform pPr'
                       return $ transform $
                         paraOrPlain $ ils'' <> insertMark
                   (Just (TrackedChange Deletion _), AcceptChanges) -> do
@@ -632,7 +638,7 @@ bodyPartToBlocks (Paragraph pPr parparts)
                    , AllChanges) -> do
                       let attr = ("", ["paragraph-deletion"], addAuthorAndDate cAuthor cDate)
                           insertMark = spanWith attr mempty
-                      transform <- parStyleToTransform pPr'
+                      transform <- paragraphStyleToTransform pPr'
                       return $ transform $
                         paraOrPlain $ ils'' <> insertMark
                   _ -> handleInsertion

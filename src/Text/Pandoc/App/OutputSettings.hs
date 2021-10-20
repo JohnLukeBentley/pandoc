@@ -45,16 +45,16 @@ readUtf8File :: PandocMonad m => FilePath -> m T.Text
 readUtf8File = fmap UTF8.toText . readFileStrict
 
 -- | Settings specifying how document output should be produced.
-data OutputSettings = OutputSettings
+data OutputSettings m = OutputSettings
   { outputFormat :: T.Text
-  , outputWriter :: Writer PandocIO
+  , outputWriter :: Writer m
   , outputWriterName :: T.Text
   , outputWriterOptions :: WriterOptions
   , outputPdfProgram :: Maybe String
   }
 
 -- | Get output settings from command line options.
-optToOutputSettings :: Opt -> PandocIO OutputSettings
+optToOutputSettings :: (PandocMonad m, MonadIO m) => Opt -> m (OutputSettings m)
 optToOutputSettings opts = do
   let outputFile = fromMaybe "-" (optOutputFile opts)
 
@@ -90,12 +90,31 @@ optToOutputSettings opts = do
                   then writerName
                   else T.toLower $ baseWriterName writerName
 
-  (writer :: Writer PandocIO, writerExts) <-
+  let makeSandboxed pureWriter =
+          let files = maybe id (:) (optReferenceDoc opts) .
+                      maybe id (:) (optEpubMetadata opts) .
+                      maybe id (:) (optEpubCoverImage opts) .
+                      maybe id (:) (optCSL opts) .
+                      maybe id (:) (optCitationAbbreviations opts) $
+                      optEpubFonts opts ++
+                      optBibliography opts
+           in  case pureWriter of
+                 TextWriter w -> TextWriter $ \o d -> sandbox files (w o d)
+                 ByteStringWriter w
+                            -> ByteStringWriter $ \o d -> sandbox files (w o d)
+
+
+  (writer, writerExts) <-
             if ".lua" `T.isSuffixOf` format
                then return (TextWriter
-                       (\o d -> writeCustom (T.unpack writerName) o d)
-                               :: Writer PandocIO, mempty)
-               else getWriter (T.toLower writerName)
+                       (\o d -> writeCustom (T.unpack writerName) o d), mempty)
+               else if optSandbox opts
+                       then
+                         case runPure (getWriter writerName) of
+                           Left e -> throwError e
+                           Right (w, wexts) ->
+                                  return (makeSandboxed w, wexts)
+                       else getWriter (T.toLower writerName)
 
   let standalone = optStandalone opts || not (isTextFormat format) || pdfOutput
 
