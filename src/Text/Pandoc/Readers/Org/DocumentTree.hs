@@ -3,7 +3,7 @@
 {-# LANGUAGE TupleSections     #-}
 {- |
    Module      : Text.Pandoc.Readers.Org.DocumentTree
-   Copyright   : Copyright (C) 2014-2021 Albert Krewinkel
+   Copyright   : Copyright (C) 2014-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -41,6 +41,7 @@ documentTree :: PandocMonad m
              -> OrgParser m (F Inlines)
              -> OrgParser m (F Headline)
 documentTree blocks inline = do
+  properties <- option mempty propertiesDrawer
   initialBlocks <- blocks
   headlines <- sequence <$> manyTill (headline blocks inline 1) eof
   title <- fmap docTitle . orgStateMeta <$> getState
@@ -54,7 +55,7 @@ documentTree blocks inline = do
       , headlineText = B.fromList title'
       , headlineTags = mempty
       , headlinePlanning = emptyPlanning
-      , headlineProperties = mempty
+      , headlineProperties = properties
       , headlineContents = initialBlocks'
       , headlineChildren = headlines'
       }
@@ -163,8 +164,15 @@ unprunedHeadlineToBlocks hdln st =
   in if not usingSelectedTags ||
         any (`Set.member` orgStateSelectTags st) (headlineTags rootNode')
         then do headlineBlocks <- headlineToBlocks rootNode'
+                -- add metadata from root node :PROPERTIES:
+                updateState $ \s ->
+                  s{ orgStateMeta = foldr
+                    (\(PropertyKey k, PropertyValue v) m ->
+                        B.setMeta k v <$> m)
+                    (orgStateMeta s)
+                    (headlineProperties rootNode') }
                 -- ignore first headline, it's the document's title
-                return . drop 1 . B.toList $ headlineBlocks
+                return $ drop 1 $ B.toList headlineBlocks
         else do headlineBlocks <- mconcat <$> mapM headlineToBlocks
                                                    (headlineChildren rootNode')
                 return . B.toList $ headlineBlocks

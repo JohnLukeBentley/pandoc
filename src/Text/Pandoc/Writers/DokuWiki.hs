@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.DokuWiki
-   Copyright   : Copyright (C) 2008-2021 John MacFarlane
+   Copyright   : Copyright (C) 2008-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Clare Macrae <clare.macrae@googlemail.com>
@@ -109,9 +109,7 @@ blockToDokuWiki opts (Plain inlines) =
 
 -- title beginning with fig: indicates that the image is a figure
 -- dokuwiki doesn't support captions - so combine together alt and caption into alt
-blockToDokuWiki opts (Para [Image attr txt (src,tgt)])
-  | Just tit <- T.stripPrefix "fig:" tgt
-  = do
+blockToDokuWiki opts (SimpleFigure attr txt (src, tit)) = do
       capt <- if null txt
               then return ""
               else (" " <>) `fmap` inlineListToDokuWiki opts txt

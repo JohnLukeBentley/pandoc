@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables   #-}
 {- |
    Module      : Text.Pandoc.Readers.LaTeX.Parsing
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -32,7 +32,6 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , getInputTokens
   , untokenize
   , untoken
-  , totoks
   , toksToString
   , satisfyTok
   , parseFromToks
@@ -90,6 +89,7 @@ module Text.Pandoc.Readers.LaTeX.Parsing
   , resetCaption
   , env
   , addMeta
+  , removeLabel
   ) where
 
 import Control.Applicative (many, (<|>))
@@ -119,6 +119,7 @@ import Text.Pandoc.Readers.LaTeX.Types (ExpansionPoint (..), Macro (..),
                                         ArgSpec (..), Tok (..), TokType (..))
 import Text.Pandoc.Shared
 import Text.Parsec.Pos
+import Text.Pandoc.Walk
 
 newtype DottedNum = DottedNum [Int]
   deriving (Show, Eq)
@@ -305,7 +306,7 @@ applyMacros s = (guardDisabled Ext_latex_macros >> return s) <|>
       pstate <- getState
       let lstate = def{ sOptions = extractReaderOptions pstate
                       , sMacros  = extractMacros pstate :| [] }
-      res <- runParserT retokenize lstate "math" (tokenize "math" s)
+      res <- runParserT retokenize lstate "math" (tokenize (initialPos "math") s)
       case res of
            Left e   -> Prelude.fail (show e)
            Right s' -> return s'
@@ -322,7 +323,7 @@ QuickCheck property:
 tokenizeSources :: Sources -> [Tok]
 tokenizeSources = concatMap tokenizeSource . unSources
  where
-   tokenizeSource (pos, t) = totoks pos t
+   tokenizeSource (pos, t) = tokenize pos t
 
 -- Return tokens from input sources. Ensure that starting position is
 -- correct.
@@ -335,12 +336,11 @@ getInputTokens = do
       Sources [] -> []
       Sources ((_,t):rest) -> tokenizeSources $ Sources ((pos,t):rest)
 
-tokenize :: SourceName -> Text -> [Tok]
-tokenize sourcename = totoks (initialPos sourcename)
-
-totoks :: SourcePos -> Text -> [Tok]
-totoks pos t =
-  case T.uncons t of
+tokenize :: SourcePos -> Text -> [Tok]
+tokenize = totoks
+ where
+  totoks pos t =
+    case T.uncons t of
        Nothing        -> []
        Just (c, rest)
          | c == '\n' ->
@@ -804,7 +804,7 @@ retokenizeComment = (do
   let updPos (Tok pos' toktype' txt') =
         Tok (incSourceColumn (incSourceLine pos' (sourceLine pos - 1))
              (sourceColumn pos)) toktype' txt'
-  let newtoks = map updPos $ tokenize (sourceName pos) $ T.tail txt
+  let newtoks = map updPos $ tokenize pos $ T.tail txt
   getInput >>= setInput . ((Tok pos Symbol "%" : newtoks) ++))
     <|> return ()
 
@@ -1067,3 +1067,16 @@ tokWith inlineParser = try $ spaces >>
 addMeta :: PandocMonad m => ToMetaValue a => Text -> a -> LP m ()
 addMeta field val = updateState $ \st ->
    st{ sMeta = addMetaField field val $ sMeta st }
+
+-- remove label spans to avoid duplicated identifier
+removeLabel :: Walkable [Inline] a => Text -> a -> a
+removeLabel lbl = walk go
+ where
+  go (Span (_,_,kvs) _ : rest)
+    | Just lbl' <- lookup "label" kvs
+    , lbl' == lbl = go (dropWhile isSpaceOrSoftBreak rest)
+  go (x:xs) = x : go xs
+  go [] = []
+  isSpaceOrSoftBreak Space = True
+  isSpaceOrSoftBreak SoftBreak = True
+  isSpaceOrSoftBreak _ = False

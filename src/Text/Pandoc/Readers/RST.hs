@@ -4,7 +4,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Readers.RST
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -725,8 +725,8 @@ directive' = do
         "figure" -> do
            (caption, legend) <- parseFromString' extractCaption body'
            let src = escapeURI $ trim top
-           return $ B.para (B.imageWith (imgAttr "figclass") src "fig:"
-                       caption) <> legend
+           return $ B.simpleFigureWith
+               (imgAttr "figclass") caption src "" <> legend
         "image" -> do
            let src = escapeURI $ trim top
            let alt = B.str $ maybe "image" trim $ lookup "alt" fields
@@ -919,14 +919,22 @@ addNewRole roleText fields = do
         (baseRole, baseFmt, baseAttr) =
                getBaseRole (parentRole, Nothing, nullAttr) customRoles
         fmt = if parentRole == "raw" then lookup "format" fields else baseFmt
-        annotate :: [Text] -> [Text]
-        annotate = maybe id (:) $
-            if baseRole == "code"
-               then lookup "language" fields
-               else Nothing
-        attr = let (ident, classes, keyValues) = baseAttr
-        -- nub in case role name & language class are the same
-               in (ident, nub . (role :) . annotate $ classes, keyValues)
+
+        updateClasses :: [Text] -> [Text]
+        updateClasses oldClasses = let
+
+          codeLanguageClass = if baseRole == "code"
+            then maybeToList (lookup "language" fields)
+            else []
+
+          -- if no ":class:" field is given, the default is the role name
+          classFieldClasses = maybe [role] T.words (lookup "class" fields)
+
+          -- nub in case role name & language class are the same
+          in nub (classFieldClasses ++ codeLanguageClass ++ oldClasses)
+
+        attr = let (ident, baseClasses, keyValues) = baseAttr
+               in (ident, updateClasses baseClasses, keyValues)
 
     -- warn about syntax we ignore
     forM_ fields $ \(key, _) -> case key of

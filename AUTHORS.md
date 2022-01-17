@@ -1,10 +1,7 @@
 # Contributors
 
-- Anabra
-- Aner Lucero
-- Arata Mizuki
-- Arfon Smith
 - Aaron Wolen
+- Agustín Martín Barbero
 - Albert Krewinkel
 - Alex Ivkin
 - Alex Toldaiev
@@ -16,18 +13,21 @@
 - Alexandre Franke
 - Alfred Wechselberger
 - Amogh Rathore
+- Anabra
 - Anders Waldenborg
 - Andreas Lööw
 - Andrew Dunning
 - Andy Morris
+- Aner Lucero
 - Anti-Distinctlyminty
 - Antoine Latter
 - Antonio Terceiro
 - Arata Mizuki
+- Arata Mizuki
+- Arfon Smith
 - Arfon Smith
 - Arlo O'Keeffe
 - Artyom Kazak
-- Agustín Martín Barbero
 - B. Scott Michel
 - Ben Firshman
 - Ben Gamari
@@ -54,6 +54,7 @@
 - Christian Despres
 - Christoffer Ackelman
 - Christoffer Sawicki
+- Christophe Dervieux
 - Clare Macrae
 - Clint Adams
 - Conal Elliott
@@ -82,17 +83,20 @@
 - Emily Bourke
 - Emily Eisenberg
 - Eric Kow
-- Erik Rask
-- Eric Seidel
 - Eric Schrijver
+- Eric Seidel
+- Erik Rask
 - Ethan Riley
 - Étienne Bersac
-- Felix Yan
+- Ezwal
+- Fabián Heredia Montiel
 - Félix Baylac-Jacqué
+- Felix Yan
 - Florian Beeres
 - Florian Eitel
 - Florian Klink
 - Florian Kohrt
+- Francesco Mazzoli
 - Francesco Occhipinti
 - François Gannaz
 - Frederik Elwert
@@ -112,6 +116,7 @@
 - Heiko Schlittermann
 - Henrik Tramberend
 - Henry de Valence
+- Herwig Stuetz
 - Hubert Plociniczak
 - Ian Max Andolina
 - Igor Khorlo
@@ -119,7 +124,6 @@
 - Ilya V. Portnov
 - Ivan Trubach
 - Ivo Clarysse
-- Jared Lander
 - J. B. Rainsberger
 - J. Lewis Muir
 - Jaime Marquínez Ferrándiz
@@ -130,23 +134,27 @@
 - Jan Larres
 - Jan Schulz
 - Jan Tojnar
+- Jannik Buhr
 - Jan-Otto Kröpke
+- Jared Lander
 - Jason Ronallo
 - Jeff Arnold
 - Jeff Runningen
 - Jens Getreu
 - Jens Petersen
+- Jesse Hathaway
+- Jérémy Bobbio
 - Jeroen de Haas
 - Jerry Sky
 - Jesse Rosenthal
 - Joe Hermaszewski
 - Joe Hillenbrand
 - John KetzerX
+- John Luke Bentley
 - John MacFarlane
 - John Muccigrosso
-- John Luke Bentley
-- Jonas Smedegaard
 - Jonas Scholl
+- Jonas Smedegaard
 - Jonathan Daugherty
 - Jose Luis Duran
 - José de Mattos Neto
@@ -157,7 +165,6 @@
 - Juliette Fourcot
 - Juliusz Gonera
 - Justin Bogner
-- Jérémy Bobbio
 - Karl Pettersson
 - Keiichiro Shikano
 - Kelsey Hightower
@@ -165,7 +172,6 @@
 - Konstantin Zudov
 - Kristof Bastiaensen
 - Krystof Beuermann
-- Herwig Stuetz
 - Lars-Dominik Braun
 - Laurent P. René de Cotret
 - Leif Metcalf
@@ -174,6 +180,7 @@
 - Loïc Grobol
 - Lorenzo
 - Lucas Escot
+- Lucas Viana
 - Luke Plant
 - Marc Schreiber
 - Mark Szepieniec
@@ -201,6 +208,7 @@
 - Michael Snoyman
 - Michael Thompson
 - Mike Tzou
+- Milan Bracke
 - MinRK
 - Morton Fox
 - Nathan Gass
@@ -222,8 +230,8 @@
 - Owen McGrath
 - Pablo Rodríguez
 - Pascal Wagler
-- Paul Tilley
 - Paul Rivier
+- Paul Tilley
 - Paulo Tanimoto
 - Pete Ryland
 - Peter Fabinksi
@@ -233,14 +241,19 @@
 - Phillip Alday
 - Prayag Verma
 - Puneeth Chaganti
+- Quinn
 - Ralf Stephan
 - Raniere Silva
 - Raymond Ehlers
 - Recai Oktaş
+- Rowan Rodrik van der Molen
 - Roland Hieber
 - Roman Beránek
 - RyanGlScott
+- S.P.H
 - Salim B
+- Samuel Tardieu
+- Saumel Lemmenmeier
 - Sascha Wilde
 - Scott Morrison
 - Sebastian Talmon
@@ -253,25 +266,29 @@
 - Sidarth Kapur
 - Sidharth Kapur
 - Simon Hengel
+- Simon Schuster
 - Stefan Dresselhaus
 - Sumit Sahrawat
+- TEC
 - Tarik Graba
 - Tatiana Porras
 - Thenaesh Elango
 - Thomas Hodgson
 - Thomas Weißschuh
 - Tim Lin
+- Tim Wisotzki
 - Timm Albers
 - Timothy Humphries
 - Tiziano Müller
 - Todd Sifleet
 - Tom Leese
-- Tristan de Cacqueray
 - Tristan Stenner
+- Tristan de Cacqueray
+- Tuong Nguyen Manh
 - Uli Köhler
 - Urs Liska
-- Václav Zeman
 - Václav Haisman
+- Václav Zeman
 - Vaibhav Sagar
 - Vanessa McHale
 - Vasily Alferov
@@ -279,8 +296,8 @@
 - Viktor Kronvall
 - Vincent
 - Vlad Hanciuta
-- Wandmalfarbe
 - Waldir Pimenta
+- Wandmalfarbe
 - Wikiwide
 - William Lupton
 - Winnie Hellmann
@@ -299,10 +316,11 @@
 - chinapedia
 - cholonam
 - csforste
-- dbecher-ito
 - d-dorazio
+- dbecher-ito
 - ebiim
 - favonia
+- hseg
 - infinity0x
 - jeongminkim-islab
 - kaizshang91
@@ -310,14 +328,14 @@
 - lwolfsonkin
 - mbrackeantidot
 - mt_caret
-- nkalvi
 - niszet
+- nkalvi
 - nuew
 - obcat
 - oltolm
 - oquechy
-- quasicomputational
 - qerub
+- quasicomputational
 - robabla
 - roblabla
 - rodja.trappe
@@ -326,11 +344,11 @@
 - takahashim
 - taotieren
 - tecosaur
-- TEC
 - tgkokk
 - the-solipsist
-- timo-a
 - thsutton
+- timo-a
 - vijayphoenix
 - wiefling
+- willj-dev
 - wuffi

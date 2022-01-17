@@ -6,7 +6,7 @@
 {-# LANGUAGE OverloadedStrings          #-}
 {- |
    Module      : Text.Pandoc.Extensions
-   Copyright   : Copyright (C) 2012-2021 John MacFarlane
+   Copyright   : Copyright (C) 2012-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -40,31 +40,8 @@ import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Safe (readMay)
 import Text.Parsec
-import Data.Aeson.TH (deriveJSON, defaultOptions)
-
-newtype Extensions = Extensions Integer
-  deriving (Show, Read, Eq, Ord, Data, Typeable, Generic)
-
-instance Semigroup Extensions where
-  (Extensions a) <> (Extensions b) = Extensions (a .|. b)
-instance Monoid Extensions where
-  mempty = Extensions 0
-  mappend = (<>)
-
-extensionsFromList :: [Extension] -> Extensions
-extensionsFromList = foldr enableExtension emptyExtensions
-
-emptyExtensions :: Extensions
-emptyExtensions = Extensions 0
-
-extensionEnabled :: Extension -> Extensions -> Bool
-extensionEnabled x (Extensions exts) = testBit exts (fromEnum x)
-
-enableExtension :: Extension -> Extensions -> Extensions
-enableExtension x (Extensions exts) = Extensions (setBit exts (fromEnum x))
-
-disableExtension :: Extension -> Extensions -> Extensions
-disableExtension x (Extensions exts) = Extensions (clearBit exts (fromEnum x))
+import Data.Aeson.TH (deriveJSON)
+import Data.Aeson
 
 -- | Individually selectable syntax extensions.
 data Extension =
@@ -161,6 +138,40 @@ data Extension =
     | Ext_xrefs_number        -- ^ Use xrefs with numbers
     | Ext_yaml_metadata_block -- ^ YAML metadata block
     deriving (Show, Read, Enum, Eq, Ord, Bounded, Data, Typeable, Generic)
+
+$(deriveJSON defaultOptions{ constructorTagModifier = drop 4 } ''Extension)
+
+newtype Extensions = Extensions Integer
+  deriving (Show, Read, Eq, Ord, Data, Typeable, Generic)
+
+instance Semigroup Extensions where
+  (Extensions a) <> (Extensions b) = Extensions (a .|. b)
+instance Monoid Extensions where
+  mempty = Extensions 0
+  mappend = (<>)
+
+instance FromJSON Extensions where
+  parseJSON =
+    return . foldr enableExtension emptyExtensions . fromJSON
+
+instance ToJSON Extensions where
+  toJSON exts = toJSON $
+    [ext | ext <- [minBound..maxBound], extensionEnabled ext exts]
+
+extensionsFromList :: [Extension] -> Extensions
+extensionsFromList = foldr enableExtension emptyExtensions
+
+emptyExtensions :: Extensions
+emptyExtensions = Extensions 0
+
+extensionEnabled :: Extension -> Extensions -> Bool
+extensionEnabled x (Extensions exts) = testBit exts (fromEnum x)
+
+enableExtension :: Extension -> Extensions -> Extensions
+enableExtension x (Extensions exts) = Extensions (setBit exts (fromEnum x))
+
+disableExtension :: Extension -> Extensions -> Extensions
+disableExtension x (Extensions exts) = Extensions (clearBit exts (fromEnum x))
 
 -- | Extensions to be used with pandoc-flavored markdown.
 pandocExtensions :: Extensions
@@ -421,6 +432,8 @@ getDefaultExtensions "jats_archiving"  = getDefaultExtensions "jats"
 getDefaultExtensions "jats_publishing" = getDefaultExtensions "jats"
 getDefaultExtensions "jats_articleauthoring" = getDefaultExtensions "jats"
 getDefaultExtensions "opml"            = pandocExtensions -- affects notes
+getDefaultExtensions "markua"          = extensionsFromList
+                                          []
 getDefaultExtensions _                 = extensionsFromList
                                           [Ext_auto_identifiers]
 
@@ -523,6 +536,7 @@ getAllExtensions f = universalExtensions <> getAll f
     extensionsFromList
     [ Ext_citations
     , Ext_smart
+    , Ext_fancy_lists
     , Ext_task_lists
     ]
   getAll "html"            = autoIdExtensions <>
@@ -611,12 +625,10 @@ parseFormatSpec = parse formatSpec ""
                        Just n  -> return n
                        Nothing
                          | name == "lhs" -> return Ext_literate_haskell
-                         | otherwise -> Prelude.fail $
-                                          "Unknown extension: " ++ name
+                         | otherwise -> unexpected $
+                                          "unknown extension: " ++ name
           return $ \(extsToEnable, extsToDisable) ->
                     case polarity of
                         '+' -> (ext : extsToEnable, extsToDisable)
                         _   -> (extsToEnable, ext : extsToDisable)
 
-$(deriveJSON defaultOptions ''Extension)
-$(deriveJSON defaultOptions ''Extensions)

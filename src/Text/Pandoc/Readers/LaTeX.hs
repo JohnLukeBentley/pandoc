@@ -4,7 +4,7 @@
 {-# LANGUAGE ViewPatterns          #-}
 {- |
    Module      : Text.Pandoc.Readers.LaTeX
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -126,7 +126,8 @@ resolveRefs _ x = x
 --   res <- runIOorExplode (runParserT p defaultLaTeXState{
 --             sOptions = def{ readerExtensions =
 --               enableExtension Ext_raw_tex $
---                 getDefaultExtensions "latex" }} "source" (tokenize "source" t))
+--                 getDefaultExtensions "latex" }} "source"
+--                   (tokenize (initialPos "source") t))
 --   case res of
 --        Left e  -> error (show e)
 --        Right r -> return r
@@ -390,8 +391,8 @@ inlineCommands = M.unions
                                unescapeURL .
                                removeDoubleQuotes $ untokenize src)
     -- hyperref
-    , ("url", (\url -> link url "" (str url)) . unescapeURL . untokenize <$>
-                    bracedUrl)
+    , ("url", (\url -> linkWith ("",["uri"],[]) url "" (str url))
+                        . unescapeURL . untokenize <$> bracedUrl)
     , ("nolinkurl", code . unescapeURL . untokenize <$> bracedUrl)
     , ("href", do url <- bracedUrl
                   sp
@@ -721,7 +722,7 @@ insertIncluded defaultExtension f' = do
                    Nothing -> do
                      report $ CouldNotLoadIncludeFile (T.pack f) pos
                      return ""
-  getInput >>= setInput . (tokenize f contents ++)
+  getInput >>= setInput . (tokenize (initialPos f) contents ++)
   updateState dropLatestIncludeFile
 
 authors :: PandocMonad m => LP m ()
@@ -1095,24 +1096,28 @@ figure = try $ do
 
 addImageCaption :: PandocMonad m => Blocks -> LP m Blocks
 addImageCaption = walkM go
-  where go (Image attr@(_, cls, kvs) alt (src,tit))
+  where go p@(Para [Image attr@(_, cls, kvs) _ (src, tit)])
             | not ("fig:" `T.isPrefixOf` tit) = do
           st <- getState
-          let (alt', tit') = case sCaption st of
-                               Just ils -> (toList ils, "fig:" <> tit)
-                               Nothing  -> (alt, tit)
-              attr' = case sLastLabel st of
-                        Just lab -> (lab, cls, kvs)
-                        Nothing  -> attr
-          case attr' of
-               ("", _, _)    -> return ()
-               (ident, _, _) -> do
-                  num <- getNextNumber sLastFigureNum
-                  setState
-                    st{ sLastFigureNum = num
-                      , sLabels = M.insert ident
-                                 [Str (renderDottedNum num)] (sLabels st) }
-          return $ Image attr' alt' (src, tit')
+          case sCaption st of
+            Nothing -> return p
+            Just figureCaption -> do
+              let mblabel = sLastLabel st
+              let attr' = case mblabel of
+                            Just lab -> (lab, cls, kvs)
+                            Nothing  -> attr
+              case attr' of
+                   ("", _, _)    -> return ()
+                   (ident, _, _) -> do
+                      num <- getNextNumber sLastFigureNum
+                      setState
+                        st{ sLastFigureNum = num
+                          , sLabels = M.insert ident
+                                     [Str (renderDottedNum num)] (sLabels st) }
+
+              return $ SimpleFigure attr'
+                       (maybe id removeLabel mblabel (B.toList figureCaption))
+                       (src, tit)
         go x = return x
 
 coloredBlock :: PandocMonad m => Text -> LP m Blocks

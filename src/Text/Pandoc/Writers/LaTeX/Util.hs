@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {- |
    Module      : Text.Pandoc.Writers.LaTeX.Util
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -124,7 +124,7 @@ stringToLaTeX context zs = do
          '\160' -> emits "~"
          '\x200B' -> emits "\\hspace{0pt}"  -- zero-width space
          '\x202F' -> emits "\\,"
-         '\x2026' -> emitcseq "\\ldots"
+         '\x2026' | ligatures -> emitcseq "\\ldots"
          '\x2018' | ligatures -> emitquote "`"
          '\x2019' | ligatures -> emitquote "'"
          '\x201C' | ligatures -> emitquote "``"

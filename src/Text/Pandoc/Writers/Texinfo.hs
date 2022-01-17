@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.Texinfo
-   Copyright   : Copyright (C) 2008-2021 John MacFarlane
+   Copyright   : Copyright (C) 2008-2022 John MacFarlane
                                2012 Peter Wang
    License     : GNU GPL, version 2 or above
 
@@ -123,8 +123,7 @@ blockToTexinfo (Plain lst) =
   inlineListToTexinfo lst
 
 -- title beginning with fig: indicates that the image is a figure
-blockToTexinfo (Para [Image attr txt (src,tgt)])
-  | Just tit <- T.stripPrefix "fig:" tgt = do
+blockToTexinfo (SimpleFigure attr txt (src, tit)) = do
       capt <- if null txt
               then return empty
               else (\c -> text "@caption" <> braces c) `fmap`

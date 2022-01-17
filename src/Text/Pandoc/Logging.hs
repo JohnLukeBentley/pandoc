@@ -1,10 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
-{-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE OverloadedStrings  #-}
 {- |
    Module      : Text.Pandoc.Logging
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -24,7 +23,6 @@ module Text.Pandoc.Logging (
   ) where
 
 import Control.Monad (mzero)
-import Data.YAML (withStr, FromYAML(..))
 import Data.Aeson
 import Data.Aeson.Encode.Pretty (Config (..), defConfig, encodePretty',
                                  keyOrder)
@@ -52,13 +50,6 @@ instance FromJSON Verbosity where
          "INFO"    -> return INFO
          _         -> mzero
   parseJSON _      =  mzero
-
-instance FromYAML Verbosity where
-  parseYAML = withStr "Verbosity" $ \case
-         "ERROR"   -> return ERROR
-         "WARNING" -> return WARNING
-         "INFO"    -> return INFO
-         _         -> mzero
 
 data LogMessage =
     SkippedContent Text SourcePos

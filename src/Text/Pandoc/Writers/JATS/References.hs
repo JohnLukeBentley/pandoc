@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.JATS.References
-   Copyright   : © 2021 Albert Krewinkel
+   Copyright   : © 2021-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb@zeitkraut.de>
@@ -70,6 +70,7 @@ referenceToJATS _opts ref = do
     , "pages"           `varInTag` "page-range"
     , "ISBN"            `varInTag` "isbn"
     , "ISSN"            `varInTag` "issn"
+    , "URL"             `varInTag` "uri"
     , varInTagWith "doi"  "pub-id" [("pub-id-type", "doi")]
     , varInTagWith "pmid" "pub-id" [("pub-id-type", "pmid")]
     ]

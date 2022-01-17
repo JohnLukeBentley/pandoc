@@ -9,7 +9,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {- |
    Module      : Text.Pandoc.Lua.PandocLua
-   Copyright   : Copyright © 2020-2021 Albert Krewinkel
+   Copyright   : Copyright © 2020-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -22,26 +22,22 @@ module Text.Pandoc.Lua.PandocLua
   ( PandocLua (..)
   , runPandocLua
   , liftPandocLua
-  , addFunction
-  , loadDefaultModule
   ) where
 
 import Control.Monad.Catch (MonadCatch, MonadMask, MonadThrow)
 import Control.Monad.Except (MonadError (catchError, throwError))
-import Control.Monad.IO.Class (MonadIO (liftIO))
-import Foreign.Lua (Lua (..), NumResults, Pushable, ToHaskellFunction)
-import Text.Pandoc.Class.PandocMonad (PandocMonad (..), readDefaultDataFile)
-import Text.Pandoc.Error (PandocError (PandocLuaError))
+import Control.Monad.IO.Class (MonadIO)
+import HsLua as Lua
+import Text.Pandoc.Class.PandocMonad (PandocMonad (..))
+import Text.Pandoc.Error (PandocError)
 import Text.Pandoc.Lua.Global (Global (..), setGlobals)
-import Text.Pandoc.Lua.ErrorConversion (errorConversion)
+import Text.Pandoc.Lua.Marshal.CommonState (peekCommonState)
 
 import qualified Control.Monad.Catch as Catch
-import qualified Data.Text as T
-import qualified Foreign.Lua as Lua
 import qualified Text.Pandoc.Class.IO as IO
 
 -- | Type providing access to both, pandoc and Lua operations.
-newtype PandocLua a = PandocLua { unPandocLua :: Lua a }
+newtype PandocLua a = PandocLua { unPandocLua :: LuaE PandocError a }
   deriving
     ( Applicative
     , Functor
@@ -53,7 +49,7 @@ newtype PandocLua a = PandocLua { unPandocLua :: Lua a }
     )
 
 -- | Lift a @'Lua'@ operation into the @'PandocLua'@ type.
-liftPandocLua :: Lua a -> PandocLua a
+liftPandocLua :: LuaE PandocError a -> PandocLua a
 liftPandocLua = PandocLua
 
 -- | Evaluate a @'PandocLua'@ computation, running all contained Lua
@@ -62,7 +58,7 @@ runPandocLua :: (PandocMonad m, MonadIO m) => PandocLua a -> m a
 runPandocLua pLua = do
   origState <- getCommonState
   globals <- defaultGlobals
-  (result, newState) <- liftIO . Lua.run' errorConversion . unPandocLua $ do
+  (result, newState) <- liftIO . Lua.run . unPandocLua $ do
     putCommonState origState
     liftPandocLua $ setGlobals globals
     r <- pLua
@@ -71,35 +67,11 @@ runPandocLua pLua = do
   putCommonState newState
   return result
 
-instance {-# OVERLAPPING #-} ToHaskellFunction (PandocLua NumResults) where
-  toHsFun _narg = unPandocLua
+instance {-# OVERLAPPING #-} Exposable PandocError (PandocLua NumResults) where
+  partialApply _narg = unPandocLua
 
-instance Pushable a => ToHaskellFunction (PandocLua a) where
-  toHsFun _narg x = 1 <$ (unPandocLua x >>= Lua.push)
-
--- | Add a function to the table at the top of the stack, using the given name.
-addFunction :: ToHaskellFunction a => String -> a -> PandocLua ()
-addFunction name fn = liftPandocLua $ do
-  Lua.push name
-  Lua.pushHaskellFunction fn
-  Lua.rawset (-3)
-
--- | Load a pure Lua module included with pandoc. Leaves the result on
--- the stack and returns @NumResults 1@.
---
--- The script is loaded from the default data directory. We do not load
--- from data directories supplied via command line, as this could cause
--- scripts to be executed even though they had not been passed explicitly.
-loadDefaultModule :: String -> PandocLua NumResults
-loadDefaultModule name = do
-  script <- readDefaultDataFile (name <> ".lua")
-  status <- liftPandocLua $ Lua.dostring script
-  if status == Lua.OK
-    then return (1 :: NumResults)
-    else do
-      msg <- liftPandocLua Lua.popValue
-      let err = "Error while loading `" <> name <> "`.\n" <> msg
-      throwError $ PandocLuaError (T.pack err)
+instance Pushable a => Exposable PandocError (PandocLua a) where
+  partialApply _narg x = 1 <$ (unPandocLua x >>= Lua.push)
 
 -- | Global variables which should always be set.
 defaultGlobals :: PandocMonad m => m [Global]
@@ -135,7 +107,7 @@ instance PandocMonad PandocLua where
 
   getCommonState = PandocLua $ do
     Lua.getglobal "PANDOC_STATE"
-    Lua.peek Lua.stackTop
+    forcePeek $ peekCommonState Lua.top
   putCommonState = PandocLua . setGlobals . (:[]) . PANDOC_STATE
 
   logOutput = IO.logOutput

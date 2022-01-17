@@ -2,7 +2,7 @@
 {-# LANGUAGE ViewPatterns          #-}
 {- |
    Module      : Text.Pandoc.Readers.LaTeX.Inline
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -56,8 +56,7 @@ dolabel = do
   let refstr = untokenize v
   updateState $ \st ->
     st{ sLastLabel = Just refstr }
-  return $ spanWith (refstr,[],[("label", refstr)])
-    $ inBrackets $ str $ untokenize v
+  return $ spanWith (refstr,[],[("label", refstr)]) mempty
 
 doref :: PandocMonad m => Text -> LP m Inlines
 doref cls = do
@@ -97,7 +96,7 @@ verbTok stopchar = do
          let (t1, t2) = T.splitAt i txt
          inp <- getInput
          setInput $ Tok (incSourceColumn pos i) Symbol (T.singleton stopchar)
-                  : totoks (incSourceColumn pos (i + 1)) (T.drop 1 t2) ++ inp
+                  : tokenize (incSourceColumn pos (i + 1)) (T.drop 1 t2) ++ inp
          return $ Tok pos toktype t1
 
 listingsLanguage :: [(Text, Text)] -> Maybe Text
@@ -339,6 +338,7 @@ refCommands = M.fromList
   , ("cref", rawInlineOr "cref" $ doref "ref")       -- from cleveref.sty
   , ("vref", rawInlineOr "vref" $ doref "ref+page")  -- from varioref.sty
   , ("eqref", rawInlineOr "eqref" $ doref "eqref")   -- from amsmath.sty
+  , ("autoref", rawInlineOr "autoref" $ doref "autoref") -- from hyperref.sty
   ]
 
 acronymCommands :: PandocMonad m => M.Map Text (LP m Inlines)

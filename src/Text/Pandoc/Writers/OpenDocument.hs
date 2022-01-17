@@ -2,7 +2,6 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
-{-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Writers.OpenDocument
    Copyright   : Copyright (C) 2008-2020 Andrea Rossato and John MacFarlane
@@ -193,7 +192,7 @@ formulaStyle mt = inTags False "style:style"
                                                   ,("style:vertical-rel", "text")]
                                                 else
                                                   [("style:vertical-pos",   "middle")
-                                                  ,("style:vertical-rel",   "paragraph-content")
+                                                  ,("style:vertical-rel",   "text")
                                                   ,("style:horizontal-pos", "center")
                                                   ,("style:horizontal-rel", "paragraph-content")
                                                   ,("style:wrap",           "none")]
@@ -377,7 +376,7 @@ blockToOpenDocument o = \case
     Plain          b -> if null b
                         then return empty
                         else inParagraphTags =<< inlinesToOpenDocument o b
-    Para [Image attr c (s,T.stripPrefix "fig:" -> Just t)] -> figure attr c s t
+    SimpleFigure attr c (s, t) -> figure attr c s t
     Para           b -> if null b &&
                            not (isEnabled Ext_empty_paragraphs o)
                         then return empty

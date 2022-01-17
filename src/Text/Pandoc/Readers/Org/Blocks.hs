@@ -4,7 +4,7 @@
 {-# LANGUAGE RecordWildCards   #-}
 {- |
    Module      : Text.Pandoc.Readers.Org.Blocks
-   Copyright   : Copyright (C) 2014-2021 Albert Krewinkel
+   Copyright   : Copyright (C) 2014-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <tarleb+pandoc@moltkeplatz.de>
@@ -167,9 +167,8 @@ keyValues = try $
    value = skipSpaces *> manyTillChar anyChar endOfValue
 
    endOfValue :: Monad m => OrgParser m ()
-   endOfValue =
-     lookAhead $ (() <$ try (many1 spaceChar <* key))
-              <|> () <$ newline
+   endOfValue = lookAhead (void $ try (many1 spaceChar <* key))
+            <|> try (skipSpaces <* lookAhead newline)
 
 
 --
@@ -474,15 +473,16 @@ figure = try $ do
        figCaption = fromMaybe mempty $ blockAttrCaption figAttrs
        figKeyVals = blockAttrKeyValues figAttrs
        attr       = (figLabel, mempty, figKeyVals)
-       figTitle   = (if isFigure then withFigPrefix else id) figName
-     in
-       B.para . B.imageWith attr imgSrc figTitle <$> figCaption
-
-   withFigPrefix :: Text -> Text
-   withFigPrefix cs =
-     if "fig:" `T.isPrefixOf` cs
-     then cs
-     else "fig:" <> cs
+     in if isFigure
+           then (\c ->
+               B.simpleFigureWith
+                   attr c imgSrc (unstackFig figName)) <$> figCaption
+           else B.para . B.imageWith attr imgSrc figName <$> figCaption
+   unstackFig :: Text -> Text
+   unstackFig figName =
+       if "fig:" `T.isPrefixOf` figName
+           then T.drop 4 figName
+           else figName
 
 -- | Succeeds if looking at the end of the current paragraph
 endOfParagraph :: Monad m => OrgParser m ()
@@ -802,7 +802,7 @@ paraOrPlain = try $ do
   -- is directly followed by a list item, in which case the block is read as
   -- plain text.
   try (guard nl
-       *> notFollowedBy (inList *> (orderedListStart <|> bulletListStart))
+       *> notFollowedBy (inList *> (void orderedListStart <|> void bulletListStart))
        $> (B.para <$> ils))
     <|>  return (B.plain <$> ils)
 
@@ -834,9 +834,12 @@ indented indentedMarker minIndent = try $ do
 
 orderedList :: PandocMonad m => OrgParser m (F Blocks)
 orderedList = try $ do
-  indent <- lookAhead orderedListStart
-  fmap (B.orderedList . compactify) . sequence
-    <$> many1 (listItem (orderedListStart `indented` indent))
+  (indent, attr) <- lookAhead orderedListStart
+  attr' <- option (fst3 attr, DefaultStyle, DefaultDelim) $
+           guardEnabled Ext_fancy_lists $> attr
+  fmap (B.orderedListWith attr' . compactify) . sequence
+    <$> many1 (listItem ((fst <$> orderedListStart) `indented` indent))
+  where fst3 (x,_,_) = x
 
 definitionListItem :: PandocMonad m
                    => OrgParser m Int

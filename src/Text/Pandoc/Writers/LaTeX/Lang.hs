@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.Writers.LaTeX.Lang
-   Copyright   : Copyright (C) 2006-2021 John MacFarlane
+   Copyright   : Copyright (C) 2006-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -43,7 +43,7 @@ toBabel (Lang "en" _ (Just "US") _ _ _) = "american"
 toBabel (Lang "fr" _ (Just "CA") _ _ _) = "canadien"
 toBabel (Lang "fra" _ _ vars _ _)
   | "aca" `elem` vars                   = "acadian"
-toBabel (Lang "grc" _ _ _ _ _)          = "polutonikogreek"
+toBabel (Lang "grc" _ _ _ _ _)          = "ancientgreek"
 toBabel (Lang "hsb" _ _ _ _ _)          = "uppersorbian"
 toBabel (Lang "la" _ _ vars _ _)
   | "x-classic" `elem` vars             = "classiclatin"
@@ -89,6 +89,7 @@ commonFromBcp47 (Lang l _ _ _ _ _) = fromIso l
     fromIso "gd"  = "scottish"
     fromIso "gez" = "ethiopic"
     fromIso "gl"  = "galician"
+    fromIso "gu"  = "gujarati"
     fromIso "he"  = "hebrew"
     fromIso "hi"  = "hindi"
     fromIso "hr"  = "croatian"
@@ -117,7 +118,8 @@ commonFromBcp47 (Lang l _ _ _ _ _) = fromIso l
     fromIso "no"  = "norsk"
     fromIso "nqo" = "nko"
     fromIso "oc"  = "occitan"
-    fromIso "pa"  = "panjabi"
+    fromIso "or"  = "oriya"
+    fromIso "pa"  = "punjabi"
     fromIso "pl"  = "polish"
     fromIso "pms" = "piedmontese"
     fromIso "pt"  = "portuguese"

@@ -3,7 +3,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.ConTeXt
-   Copyright   : Copyright (C) 2007-2021 John MacFarlane
+   Copyright   : Copyright (C) 2007-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -162,10 +162,7 @@ blockToConTeXt (Div attr@(_,"section":_,_)
   innerContents <- blockListToConTeXt xs
   return $ header' $$ innerContents $$ footer'
 blockToConTeXt (Plain lst) = inlineListToConTeXt lst
--- title beginning with fig: indicates that the image is a figure
-blockToConTeXt (Para [Image attr txt (src,tgt)])
-  | Just _ <- T.stripPrefix "fig:" tgt
-  = do
+blockToConTeXt (SimpleFigure attr txt (src, _)) = do
       capt <- inlineListToConTeXt txt
       img  <- inlineToConTeXt (Image attr txt (src, ""))
       let (ident, _, _) = attr

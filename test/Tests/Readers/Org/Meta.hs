@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Tests.Readers.Org.Meta
-   Copyright   : © 2014-2021 Albert Krewinkel
+   Copyright   : © 2014-2022 Albert Krewinkel
    License     : GNU GPL, version 2 or above
 
    Maintainer  : Albert Krewinkel <albert@zeitkraut.de>
@@ -238,7 +238,7 @@ tests =
                 , "  :setting: foo"
                 , "  :END:"
                 ] =?>
-      (mempty::Blocks)
+      (setMeta "setting" ("foo" :: T.Text) (doc mempty))
 
   , "Logbook drawer" =:
       T.unlines [ "  :LogBook:"

@@ -1,7 +1,7 @@
 ---
 title: Pandoc User's Guide
 author: John MacFarlane
-date: August 20, 2021
+date: January 14, 2022
 ---
 
 # Synopsis
@@ -57,7 +57,7 @@ use the `-s` or `--standalone` flag:
 For more information on how standalone documents are produced, see
 [Templates] below.
 
-If multiple input files are given, `pandoc` will concatenate them all (with
+If multiple input files are given, pandoc will concatenate them all (with
 blank lines between them) before parsing. (Use `--file-scope` to parse files
 individually.)
 
@@ -80,7 +80,7 @@ can also use `pandoc --list-input-formats` and
 `pandoc --list-output-formats` to print lists of supported
 formats.
 
-If the input or output format is not specified explicitly, `pandoc`
+If the input or output format is not specified explicitly, pandoc
 will attempt to guess it from the extensions of the filenames.
 Thus, for example,
 
@@ -266,6 +266,7 @@ header when requesting a document from a URL:
     - `tikiwiki` ([TikiWiki markup])
     - `twiki` ([TWiki markup])
     - `vimwiki` ([Vimwiki])
+    - the path of a custom Lua reader, see [Custom readers and writers] below
     :::
 
     Extensions can be individually enabled or disabled by
@@ -315,6 +316,7 @@ header when requesting a document from a URL:
     - `markdown_mmd` ([MultiMarkdown])
     - `markdown_phpextra` ([PHP Markdown Extra])
     - `markdown_strict` (original unextended [Markdown])
+    - `markua` ([Markua])
     - `mediawiki` ([MediaWiki markup])
     - `ms` ([roff ms])
     - `muse` ([Muse]),
@@ -338,7 +340,7 @@ header when requesting a document from a URL:
     - `tei` ([TEI Simple])
     - `xwiki` ([XWiki markup])
     - `zimwiki` ([ZimWiki markup])
-    - the path of a custom Lua writer, see [Custom writers] below
+    - the path of a custom Lua writer, see [Custom readers and writers] below
     :::
 
     Note that `odt`, `docx`, `epub`, and `pdf` output will not be directed
@@ -501,6 +503,7 @@ header when requesting a document from a URL:
 [CSL JSON]: https://citeproc-js.readthedocs.io/en/latest/csl-json/markup.html
 [BibTeX]: https://ctan.org/pkg/bibtex
 [BibLaTeX]: https://ctan.org/pkg/biblatex
+[Markua]: https://leanpub.com/markua/read
 
 ## Reader options {.options}
 
@@ -787,7 +790,6 @@ header when requesting a document from a URL:
     preserve the wrapping from the source document (that is,
     where there are nonsemantic newlines in the source, there
     will be nonsemantic newlines in the output as well).
-    Automatic wrapping does not currently work in HTML output.
     In `ipynb` output, this option affects wrapping of the
     contents of markdown cells.
 
@@ -1480,6 +1482,7 @@ Nonzero exit codes have the following meanings:
 
  Code Error
 ----- ------------------------------------
+    1 PandocIOError
     3 PandocFailOnWarningError
     4 PandocAppError
     5 PandocTemplateError
@@ -1501,6 +1504,7 @@ Nonzero exit codes have the following meanings:
    66 PandocMakePDFError
    67 PandocSyntaxMapError
    83 PandocFilterError
+   84 PandocLuaError
    91 PandocMacroLoop
    92 PandocUTF8DecodingError
    93 PandocIpynbDecodingError
@@ -2183,6 +2187,11 @@ Currently the following pipes are predefined:
 `abstract`
 :   document summary, included in LaTeX, ConTeXt, AsciiDoc, and docx
     documents
+
+`abstract-title`
+:   title of abstract, currently used only in HTML and EPUB.
+    This will be set automatically to a localized value,
+    depending on `lang`, but can be manually overridden.
 
 `keywords`
 :   list of keywords to be included in HTML, PDF, ODT, pptx, docx
@@ -3158,6 +3167,15 @@ output format.
 Some aspects of [Pandoc's Markdown citation syntax](#citations)
 are also accepted in `org` input.
 
+#### Extension: `fancy_lists` {#org-fancy-lists}
+
+Some aspects of [Pandoc's Markdown fancy lists](#extension-fancy_lists) are also
+accepted in `org` input, mimicking the option `org-list-allow-alphabetical` in
+Emacs. As in Org Mode, enabling this extension allows lowercase and uppercase
+alphabetical markers for ordered lists to be parsed in addition to arabic ones.
+Note that for Org, this does not include roman numerals or the `#` placeholder
+that are enabled by the extension in Pandoc's Markdown.
+
 #### Extension: `element_citations` ####
 
 In the `jats` output formats, this causes reference items to
@@ -3178,7 +3196,7 @@ at a performance penalty compared to extreme tables.
 
 Pandoc understands an extended and slightly revised version of
 John Gruber's [Markdown] syntax.  This document explains the syntax,
-noting differences from standard Markdown. Except where noted, these
+noting differences from original Markdown. Except where noted, these
 differences can be suppressed by using the `markdown_strict` format instead
 of `markdown`. Extensions can be enabled or disabled to specify the
 behavior more granularly. They are described in the following. See also
@@ -3253,7 +3271,7 @@ As with setext-style headings, the heading text can contain formatting:
 
 #### Extension: `blank_before_header` ####
 
-Standard Markdown syntax does not require a blank line before a heading.
+Original Markdown syntax does not require a blank line before a heading.
 Pandoc does require this (except, of course, at the beginning of the
 document). The reason for the requirement is that it is all too easy for a
 `#` to end up at the beginning of a line by accident (perhaps through line
@@ -3394,7 +3412,7 @@ block in a block quote, you need five spaces after the `>`:
 
 #### Extension: `blank_before_blockquote` ####
 
-Standard Markdown syntax does not require a blank line before a
+Original Markdown syntax does not require a blank line before a
 block quote.  Pandoc does require this (except, of course, at
 the beginning of the document). The reason for the requirement
 is that it is all too easy for a `>` to end up at the beginning
@@ -3641,7 +3659,7 @@ other blocks in a list item, the first line of each must be indented.
 Ordered lists work just like bulleted lists, except that the items
 begin with enumerators rather than bullets.
 
-In standard Markdown, enumerators are decimal numbers followed
+In original Markdown, enumerators are decimal numbers followed
 by a period and a space.  The numbers themselves are ignored, so
 there is no difference between this list:
 
@@ -3657,7 +3675,7 @@ and this one:
 
 #### Extension: `fancy_lists` ####
 
-Unlike standard Markdown, pandoc allows ordered list items to be marked
+Unlike original Markdown, pandoc allows ordered list items to be marked
 with uppercase and lowercase letters and roman numerals, in addition to
 Arabic numerals. List markers may be enclosed in parentheses or followed by a
 single right-parentheses or period. They must be separated from the
@@ -4052,12 +4070,12 @@ legal (though ugly) pipe table:
     orange|3.09
 
 The cells of pipe tables cannot contain block elements like paragraphs
-and lists, and cannot span multiple lines.  If a pipe table contains a
-row whose Markdown content is wider than the column width (see
-`--columns`), then the table will take up the full text width and
-the cell contents will wrap, with the relative cell widths determined
-by the number of dashes in the line separating the table header from
-the table body. (For example `---|-` would make the first column 3/4
+and lists, and cannot span multiple lines.  If any line of the
+markdown source is longer than the column width (see `--columns`),
+then the table will take up the full text width and the cell
+contents will wrap, with the relative cell widths determined by
+the number of dashes in the line separating the table header
+from the table body. (For example `---|-` would make the first column 3/4
 and the second column 1/4 of the full text width.)
 On the other hand, if no lines are wider than column width, then
 cell contents will not be wrapped, and the cells will be sized
@@ -4313,12 +4331,12 @@ instead of
 
     <strong>hello</strong>
 
-This rule is easier to remember than standard Markdown's rule,
+This rule is easier to remember than original Markdown's rule,
 which allows only the following characters to be backslash-escaped:
 
     \`*_{}[]()>#+-.!
 
-(However, if the `markdown_strict` format is used, the standard Markdown rule
+(However, if the `markdown_strict` format is used, the original Markdown rule
 will be used.)
 
 A backslash-escaped space is parsed as a nonbreaking space. In TeX output,
@@ -4555,7 +4573,7 @@ they cannot use pipe syntax.
 
 #### Extension: `markdown_in_html_blocks` ####
 
-Standard Markdown allows you to include HTML "blocks":  blocks
+Original Markdown allows you to include HTML "blocks":  blocks
 of HTML between balanced tags that are separated from the surrounding text
 with blank lines, and start and end at the left margin.  Within
 these blocks, everything is interpreted as HTML, not Markdown;
@@ -4586,7 +4604,7 @@ whereas `Markdown.pl` will preserve it as is.
 There is one exception to this rule:  text between `<script>`,
 `<style>`, and `<textarea>` tags is not interpreted as Markdown.
 
-This departure from standard Markdown should make it easier to mix
+This departure from original Markdown should make it easier to mix
 Markdown with HTML block elements.  For example, one can surround
 a block of Markdown text with `<div>` tags without preventing it
 from being interpreted as Markdown.
@@ -4842,7 +4860,7 @@ nonbreaking space after the image:
     ![This image won't be a figure](/url/of/image.png)\
 
 Note that in reveal.js slide shows, an image in a paragraph
-by itself that has the `stretch` class will fill the screen,
+by itself that has the `r-stretch` class will fill the screen,
 and the caption and figure tags will be omitted.
 
 #### Extension: `link_attributes` ####
@@ -5329,9 +5347,9 @@ for regular emphasis, add extra blank space around headings.
 Include source position attributes when parsing `commonmark`.
 For elements that accept attributes, a `data-pos` attribute
 is added; other elements are placed in a surrounding
-Div or Span elemnet with a `data-pos` attribute.
+Div or Span element with a `data-pos` attribute.
 
-#### Extension: `short_subsuperscript` ####
+#### Extension: `short_subsuperscripts` ####
 
 Parse multimarkdown style subscripts and superscripts, which start with
 a '~' or '^' character, respectively, and include the alphanumeric sequence
@@ -5461,13 +5479,13 @@ If both an external bibliography and inline (YAML metadata)
 references are provided, both will be used. In case of
 conflicting `id`s, the inline references will take precedence.
 
-Note that `pandoc` can be used to produce such a YAML metadata
+Note that pandoc can be used to produce such a YAML metadata
 section from a BibTeX, BibLaTeX, or CSL JSON bibliography:
 
     pandoc chem.bib -s -f biblatex -t markdown
     pandoc chem.json -s -f csljson -t markdown
 
-Indeed, `pandoc` can convert between any of these
+Indeed, pandoc can convert between any of these
 citation formats:
 
     pandoc chem.bib -s -f biblatex -t csljson
@@ -5668,7 +5686,7 @@ whether or not they appear in the document, by using a wildcard:
 For LaTeX output, you can also use [`natbib`] or [`biblatex`] to
 render the bibliography. In order to do so, specify bibliography
 files as outlined above, and add `--natbib` or `--biblatex`
-argument to `pandoc` invocation. Bear in mind that bibliography
+argument to pandoc invocation. Bear in mind that bibliography
 files have to be in either BibTeX (for `--natbib`)
 or BibLaTeX (for `--biblatex`) format.
 
@@ -5709,13 +5727,16 @@ A few other metadata fields affect bibliography formatting:
        before lower (default is lower before upper).
 
 `notes-after-punctuation`
-:    If true (the default), pandoc will put footnote citations
+:    If true (the default for note styles), pandoc will put
+     footnote references or superscripted numerical citations
      after following punctuation.  For example, if the source
      contains `blah blah [@jones99].`, the result will look like
      `blah blah.[^1]`, with the note moved after the period and
      the space collapsed.  If false, the space will still be
      collapsed, but the footnote will not be moved after the
-     punctuation.
+     punctuation.  The option may also be used in numerical styles
+     that use superscripts for citation numbers (but for these
+     styles the default is not to move the citation).
 
 
 # Slide shows
@@ -6313,6 +6334,20 @@ images can be declared with `![img](url){external=1}`. Note that this
 only works for images; the other media elements have no native
 representation in pandoc's AST and requires the use of raw HTML.
 
+## EPUB styling
+
+By default, pandoc will include some basic styling
+contained in its `epub.css` data file.  (To see this,
+use `pandoc --print-default-data-file epub.css`.)
+To use a different CSS file, just use the `--css` command
+line option.  A few inline styles are defined in addition; these
+are essential for correct formatting of pandoc's HTML output.
+
+The `document-css` variable may be set if the more opinionated
+styling of pandoc's default HTML templates is desired (and
+in that case the variables defined in [Variables for HTML] may
+be used to fine-tune the style).
+
 # Jupyter notebooks
 
 When creating a [Jupyter notebook], pandoc will try to infer the
@@ -6572,19 +6607,35 @@ With these custom styles, you can use your input document as a
 reference-doc while creating docx output (see below), and maintain the
 same styles in your input and output files.
 
-# Custom writers
+# Custom readers and writers
 
-Pandoc can be extended with custom writers written in [Lua].  (Pandoc
-includes a Lua interpreter, so Lua need not be installed separately.)
+Pandoc can be extended with custom readers and writers written
+in [Lua].  (Pandoc includes a Lua interpreter, so Lua need not
+be installed separately.)
 
-To use a custom writer, simply specify the path to the Lua script
-in place of the output format. For example:
+To use a custom reader or writer, simply specify the path to the
+Lua script in place of the input or output format. For example:
 
     pandoc -t data/sample.lua
+    pandoc -f my_custom_markup_language.lua -t latex -s
 
-Creating a custom writer requires writing a Lua function for each
-possible element in a pandoc document.  To get a documented example
-which you can modify according to your needs, do
+A custom reader is a Lua script that defines one function,
+Reader, which takes a string as input and returns a Pandoc
+AST.  See the [Lua filters documentation] for documentation
+of the functions that are available for creating pandoc
+AST elements.  For parsing, the [lpeg] parsing library
+is available by default. To see a sample custom reader:
+
+    pandoc --print-default-data-file creole.lua
+
+If you want your custom reader to have access to reader options
+(e.g. the tab stop setting), you give your Reader function a
+second `options` parameter.
+
+A custom writer is a Lua script that defines a function
+that specifies how to render each element in a Pandoc AST.
+To see a documented example which you can modify according
+to your needs:
 
     pandoc --print-default-data-file sample.lua
 
@@ -6596,6 +6647,7 @@ default template with the name
 subdirectory of your user data directory (see [Templates]).
 
 [Lua]: https://www.lua.org
+[lpeg]:  http://www.inf.puc-rio.br/~roberto/lpeg/
 
 # Reproducible builds
 
@@ -6663,7 +6715,7 @@ application, here are some things to keep in mind:
 
 # Authors
 
-Copyright 2006--2021 John MacFarlane (jgm@berkeley.edu). Released
+Copyright 2006--2022 John MacFarlane (jgm@berkeley.edu). Released
 under the [GPL], version 2 or greater.  This software carries no
 warranty of any kind.  (See COPYRIGHT for full copyright and
 warranty notices.) For a full list of contributors, see the file

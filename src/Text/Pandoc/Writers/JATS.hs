@@ -4,7 +4,7 @@
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.JATS
-   Copyright   : 2017-2021 John MacFarlane
+   Copyright   : 2017-2022 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -291,9 +291,7 @@ blockToJATS opts (Header _ _ title) = do
   return $ inTagsSimple "title" title'
 -- No Plain, everything needs to be in a block-level tag
 blockToJATS opts (Plain lst) = blockToJATS opts (Para lst)
--- title beginning with fig: indicates that the image is a figure
-blockToJATS opts (Para [Image (ident,_,kvs) txt
-  (src,T.stripPrefix "fig:" -> Just tit)]) = do
+blockToJATS opts (SimpleFigure (ident, _, kvs) txt (src, tit)) = do
   alt <- inlinesToJATS opts txt
   let (maintype, subtype) = imageMimeType src kvs
   let capt = if null txt
@@ -553,6 +551,7 @@ inlineToJATS _ (Image (ident,_,kvs) _ (src, tit)) = do
   return $ selfClosingTag "inline-graphic" attr
 
 isParaOrList :: Block -> Bool
+isParaOrList SimpleFigure{}   = False  -- implicit figures are not paragraphs
 isParaOrList Para{}           = True
 isParaOrList Plain{}          = True
 isParaOrList BulletList{}     = True
