@@ -4,12 +4,15 @@ on:
   schedule:
     - cron: '53 7 * * *'
 
+permissions:
+  contents: read
+
 jobs:
   linux:
 
     runs-on: ubuntu-18.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install recent cabal/ghc
       uses: haskell/actions/setup@v1
@@ -44,7 +47,7 @@ jobs:
     runs-on: windows-2019
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
           stack update
@@ -70,7 +73,7 @@ jobs:
     runs-on: macOS-10.15
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Install dependencies
       run: |
           stack update

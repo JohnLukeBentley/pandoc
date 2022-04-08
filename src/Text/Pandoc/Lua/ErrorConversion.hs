@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-{-# LANGUAGE LambdaCase #-}
 {- |
    Module      : Text.Pandoc.Lua.ErrorConversion
    Copyright   : © 2020-2022 Albert Krewinkel
@@ -15,9 +14,7 @@ module Text.Pandoc.Lua.ErrorConversion
   ( addContextToException
   ) where
 
-import HsLua (LuaError, LuaE, top)
-import HsLua.Marshalling (resultToEither, runPeek)
-import HsLua.Class.Peekable (PeekError (..))
+import HsLua (LuaError, LuaE, resultToEither, runPeek, top)
 import Text.Pandoc.Error (PandocError (PandocLuaError))
 import Text.Pandoc.Lua.Marshal.PandocError (pushPandocError, peekPandocError)
 
@@ -41,8 +38,3 @@ instance LuaError PandocError where
   popException = popPandocError
   pushException = pushPandocError
   luaException = PandocLuaError . T.pack
-
-instance PeekError PandocError where
-  messageFromException = \case
-    PandocLuaError m -> T.unpack m
-    err -> show err

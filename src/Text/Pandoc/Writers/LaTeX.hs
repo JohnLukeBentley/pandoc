@@ -86,7 +86,8 @@ pandocToLaTeX options (Pandoc meta blocks) = do
               blockListToLaTeX
               (fmap chomp . inlineListToLaTeX)
               meta
-  let chaptersClasses = ["memoir","book","report","scrreprt","scrbook","extreport","extbook","tufte-book"]
+  let chaptersClasses = ["memoir","book","report","scrreprt","scrreport",
+                        "scrbook","extreport","extbook","tufte-book"]
   let frontmatterClasses = ["memoir","book","scrbook","extbook","tufte-book"]
   -- these have \frontmatter etc.
   beamer <- gets stBeamer
@@ -235,10 +236,13 @@ elementToBeamer slideLevel (Div (ident,"section":dclasses,dkvs)
              isSlide _                         = False
          let (titleBs, slideBs) = break isSlide ys
          return $
-           if null titleBs
-              then Div (ident,"section":dclasses,dkvs) xs
-              else Div (ident,"section":dclasses,dkvs)
-                    (h : Div ("","slide":dclasses,dkvs) (h:titleBs) : slideBs)
+           case titleBs of
+              [] -> Div (ident,"section":dclasses,dkvs) xs
+              [Div (_,"notes":_,_) _] ->  -- see #7857, don't create frame
+                    -- just for speaker notes after section heading
+                    Div (ident,"section":dclasses,dkvs) xs
+              _  -> Div (ident,"section":dclasses,dkvs)
+                     (h : Div ("","slide":dclasses,dkvs) (h:titleBs) : slideBs)
   | otherwise
     = return $ Div (ident,"slide":dclasses,dkvs) xs
 elementToBeamer _ x = return x
@@ -281,14 +285,15 @@ blockToLaTeX (Div (identifier,"slide":dclasses,dkvs)
   let fragile = "fragile" `elem` classes ||
                 not (null $ query hasCodeBlock bs ++ query hasCode bs)
   let frameoptions = ["allowdisplaybreaks", "allowframebreaks", "fragile",
-                      "b", "c", "t", "environment",
+                      "b", "c", "t", "environment", "s", "squeeze",
                       "label", "plain", "shrink", "standout",
                       "noframenumbering"]
   let optionslist = ["fragile" | fragile
                                , isNothing (lookup "fragile" kvs)
                                , "fragile" `notElem` classes] ++
                     [k | k <- classes, k `elem` frameoptions] ++
-                    [k <> "=" <> v | (k,v) <- kvs, k `elem` frameoptions]
+                    [k <> "=" <> v | (k,v) <- kvs, k `elem` frameoptions] ++
+                    [v | ("frameoptions", v) <- kvs]
   let options = if null optionslist
                    then empty
                    else brackets (literal (T.intercalate "," optionslist))
@@ -613,7 +618,7 @@ defListItemToLaTeX (term, defs) = do
      _                       ->
        "\\item" <> brackets term'' $$ def'
 
--- | Craft the section header, inserting the secton reference, if supplied.
+-- | Craft the section header, inserting the section reference, if supplied.
 sectionHeader :: PandocMonad m
               => [Text]  -- classes
               -> Text
@@ -737,12 +742,13 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
   let cmds = mapMaybe classToCmd classes ++ mapMaybe kvToCmd kvs ++ langCmds
   contents <- inlineListToLaTeX ils
   return $
-    (case classes of
-              ["csl-block"] -> (cr <>)
-              ["csl-left-margin"] -> (cr <>)
-              ["csl-right-inline"] -> (cr <>)
-              ["csl-indent"] -> (cr <>)
-              _ -> id) $
+    (if "csl-right-inline" `elem` classes
+        then ("%" <>) -- see #7932
+        else id) $
+    (if any (`elem` classes)
+            ["csl-block","csl-left-margin","csl-right-inline","csl-indent"]
+        then (cr <>)
+        else id) $
     (if T.null id'
         then empty
         else "\\protect" <> linkAnchor) <>
@@ -924,7 +930,7 @@ inlineToLaTeX il@(Image _ _ (src, _))
   | Just _ <- T.stripPrefix "data:" src = do
       report $ InlineNotRendered il
       return empty
-inlineToLaTeX (Image attr _ (source, _)) = do
+inlineToLaTeX (Image attr@(_,_,kvs) _ (source, _)) = do
   setEmptyLine False
   modify $ \s -> s{ stGraphics = True }
   opts <- gets stOptions
@@ -947,10 +953,13 @@ inlineToLaTeX (Image attr _ (source, _)) = do
                                 Height | isJust (dimension Width attr) ->
                                   [d <> "\\textheight"]
                                 _ -> []
-      dimList = showDim Width <> showDim Height
-      dims = if null dimList
-                then empty
-                else brackets $ mconcat (intersperse "," dimList)
+      optList = showDim Width <> showDim Height <>
+                maybe [] (\x -> ["page=" <> literal x]) (lookup "page" kvs) <>
+                maybe [] (\x -> ["trim=" <> literal x]) (lookup "trim" kvs) <>
+                maybe [] (\_ -> ["clip"]) (lookup "clip" kvs)
+      options = if null optList
+                   then empty
+                   else brackets $ mconcat (intersperse "," optList)
       source' = if isURI source
                    then source
                    else T.pack $ unEscapeString $ T.unpack source
@@ -958,7 +967,7 @@ inlineToLaTeX (Image attr _ (source, _)) = do
   inHeading <- gets stInHeading
   return $
     (if inHeading then "\\protect\\includegraphics" else "\\includegraphics") <>
-    dims <> braces (literal source'')
+    options <> braces (literal source'')
 inlineToLaTeX (Note contents) = do
   setEmptyLine False
   externalNotes <- gets stExternalNotes

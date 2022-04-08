@@ -28,7 +28,8 @@ import Text.Pandoc.XML
 
 -- | Convert Pandoc document to string in Docbook format.
 writeTEI :: PandocMonad m => WriterOptions -> Pandoc -> m Text
-writeTEI opts (Pandoc meta blocks) = do
+writeTEI opts doc = do
+  let Pandoc meta blocks = ensureValidXmlIdentifiers doc
   let colwidth = if writerWrapText opts == WrapAuto
                     then Just $ writerColumns opts
                     else Nothing
@@ -192,7 +193,7 @@ blockToTEI _ HorizontalRule = return $
                              ,("type","separator")
                              ,("rendition","line")]
 
--- | TEI Tables
+-- TEI Tables
 -- TEI Simple's tables are composed of cells and rows; other
 -- table info in the AST is here lossily discard.
 blockToTEI opts (Table _ blkCapt specs thead tbody tfoot) = do

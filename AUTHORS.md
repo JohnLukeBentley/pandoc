@@ -35,6 +35,7 @@
 - Beni Cherniavsky-Paskin
 - Benjamin Bray
 - Benoit Schweblin
+- Benson Muite
 - Bjorn Buckwalter
 - Blake Eryx
 - Bodigrim
@@ -46,6 +47,7 @@
 - Caleb Mclennan
 - Calvin Beck
 - Carlos Sosa
+- Carsten Allefeld
 - Cécile Chemin
 - Cédric Couralet
 - Charanjit Singh
@@ -74,6 +76,7 @@
 - Derek Chen-Becker
 - Diego Balseiro
 - Dimitri Sabadie
+- Dimitris Apostolou
 - Dmitry Pogodin
 - Dmitry Volodin
 - Douglas Calvert
@@ -88,6 +91,7 @@
 - Erik Rask
 - Ethan Riley
 - Étienne Bersac
+- Even Brenden
 - Ezwal
 - Fabián Heredia Montiel
 - Félix Baylac-Jacqué
@@ -110,6 +114,7 @@
 - Greg Maslov
 - Greg Rundlett
 - Grégory Bataille
+- Guriy Samarin
 - Gwern Branwen
 - Hamish Mackenzie
 - Hans-Peter Deifel
@@ -123,7 +128,9 @@
 - Igor Pashev
 - Ilya V. Portnov
 - Ivan Trubach
+- Ivar de Bruin
 - Ivo Clarysse
+- Jaap de Jong
 - J. B. Rainsberger
 - J. Lewis Muir
 - Jaime Marquínez Ferrándiz
@@ -156,6 +163,7 @@
 - Jonas Scholl
 - Jonas Smedegaard
 - Jonathan Daugherty
+- Jonathan Dönszelmann
 - Jose Luis Duran
 - José de Mattos Neto
 - Josef Svenningsson
@@ -181,8 +189,10 @@
 - Lorenzo
 - Lucas Escot
 - Lucas Viana
+- Lucas V. R
 - Luke Plant
 - Marc Schreiber
+- Mario Lang
 - Mark Szepieniec
 - Mark Wright
 - Martin Linn
@@ -212,16 +222,19 @@
 - MinRK
 - Morton Fox
 - Nathan Gass
+- Naveen
 - Neil Mayhew
 - Nick Bart
 - Nick Berendsen
 - Nick Fleisher
 - Nicolas Kaiser
+- Nikolai Korobeinikov
 - Nikolay Yakimov
 - Nils Carlson
 - Nixon Enraght-Moony
 - Nokome Bentley
 - OCzarnecki
+- Ola Wolska
 - Ole Martin Ruud
 - Oliver Matthews
 - Ophir Lifshitz
@@ -317,6 +330,7 @@
 - cholonam
 - csforste
 - d-dorazio
+- damon-sava-stanley
 - dbecher-ito
 - ebiim
 - favonia
@@ -327,6 +341,7 @@
 - lux-lth
 - lwolfsonkin
 - mbrackeantidot
+- mjfs
 - mt_caret
 - niszet
 - nkalvi
@@ -336,6 +351,7 @@
 - oquechy
 - qerub
 - quasicomputational
+- ricnorr
 - robabla
 - roblabla
 - rodja.trappe

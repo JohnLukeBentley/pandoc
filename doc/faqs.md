@@ -132,8 +132,6 @@ example,
 
     pandoc -o my.pdf --pdf-engine=/Library/TeX/texbin/pdflatex
 
-:::
-
 ## When I convert from ipynb, some visualizations aren't showing up.
 
 First, unless your target is a binary format (docx, odt, epub),
@@ -152,3 +150,15 @@ pandoc -s -o output.html input.ipynb \
 -V header-includes='<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>'
 ```
 
+## How can I get BibTeX references to work when converting from LaTeX?
+
+Use the `--citeproc` option.
+If it still doesn't work, you may need to tell pandoc where
+your bibliography file is using `--bibliography`.
+Your references may not be formatted the same as they are
+when you use `latex` and `bibtex`; you can change the format
+of the citations by specifying an appropriate CSL bibliography
+style using `--csl`
+(see [the manual](https://pandoc.org/MANUAL.html#specifying-a-citation-style)).
+
+:::
