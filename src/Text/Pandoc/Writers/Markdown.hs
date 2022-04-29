@@ -80,14 +80,18 @@ writeCommonMark opts document =
                    -- properly.
                    enableExtension Ext_all_symbols_escapable $
                    enableExtension Ext_intraword_underscores $
-                     writerExtensions opts }
+                     writerExtensions opts ,
+                writerWrapText =
+                  if isEnabled Ext_hard_line_breaks opts
+                     then WrapNone
+                     else writerWrapText opts }
 
 -- | Convert Pandoc to Markua.
 writeMarkua :: PandocMonad m => WriterOptions -> Pandoc -> m Text
 writeMarkua opts document =
   evalMD (pandocToMarkdown opts' document) def{ envVariant = Markua } def
  where
-  opts' = opts{   writerExtensions =
+  opts' = opts{ writerExtensions =
                   enableExtension Ext_hard_line_breaks $
                   enableExtension Ext_pipe_tables $
                   -- required for fancy list enumerators
@@ -99,7 +103,11 @@ writeMarkua opts document =
                   enableExtension Ext_definition_lists $
                   enableExtension Ext_smart $
                   enableExtension Ext_footnotes
-                    mempty }
+                    mempty ,
+                writerWrapText =
+                  if isEnabled Ext_hard_line_breaks opts
+                     then WrapNone
+                     else writerWrapText opts }
 
 
 pandocTitleBlock :: Doc Text -> [Doc Text] -> Doc Text -> Doc Text
@@ -684,15 +692,15 @@ bulletListItemToMarkdown opts bs = do
   variant <- asks envVariant
   let exts = writerExtensions opts
   contents <- blockListToMarkdown opts $ taskListItemToAscii exts bs
-  let sps = T.replicate (writerTabStop opts - 2) " "
   let start = case variant of
-              Markua -> literal "* "
-              _      -> literal $ "- " <> sps
+              Markua -> "* "
+              Commonmark -> "- "
+              _ -> "- " <> T.replicate (writerTabStop opts - 2) " "
   -- remove trailing blank line if item ends with a tight list
   let contents' = if itemEndsWithTightList bs
                      then chomp contents <> cr
                      else contents
-  return $ hang (writerTabStop opts) start contents'
+  return $ hang (T.length start) (literal start) contents'
 
 -- | Convert ordered list item (a list of blocks) to markdown.
 orderedListItemToMarkdown :: PandocMonad m

@@ -232,6 +232,7 @@ header when requesting a document from a URL:
     - `creole` ([Creole 1.0])
     - `csljson` ([CSL JSON] bibliography)
     - `csv` ([CSV] table)
+    - `tsv` ([TSV] table)
     - `docbook` ([DocBook])
     - `docx` ([Word docx])
     - `dokuwiki` ([DokuWiki markup])
@@ -484,6 +485,7 @@ header when requesting a document from a URL:
 [Haddock markup]: https://www.haskell.org/haddock/doc/html/ch03s08.html
 [Creole 1.0]: http://www.wikicreole.org/wiki/Creole1.0
 [CSV]: https://tools.ietf.org/html/rfc4180
+[TSV]: https://www.iana.org/assignments/media-types/text/tab-separated-values
 [roff man]: https://man.cx/groff_man(7)
 [roff ms]: https://man.cx/groff_ms(7)
 [Haskell]: https://www.haskell.org
@@ -2491,7 +2493,7 @@ Currently the following pipes are predefined:
     documents
 
 `abstract`
-:   document summary, included in LaTeX, ConTeXt, AsciiDoc, and docx
+:   document summary, included in HTML, LaTeX, ConTeXt, AsciiDoc, and docx
     documents
 
 `abstract-title`
@@ -2687,7 +2689,7 @@ These variables change the appearance of PDF slides using [`beamer`].
     `1610` for 16:10, `149` for 14:9, `141` for 1.41:1, `54` for 5:4,
     `32` for 3:2)
 
-``beameroption`
+`beameroption`
 :   add extra beamer option with `\setbeameroption{}`
 
 `institute`
@@ -7038,7 +7040,7 @@ metadata field (see [EPUB Metadata], above).
    pandoc operations in the `PandocPure` monad. See the document
    [Using the pandoc API](https://pandoc.org/using-the-pandoc-api.html)
    for more details. (This corresponds to the use of the `--sandbox`
-   option on the command line.) 
+   option on the command line.)
 
 5. Pandoc's parsers can exhibit pathological performance on some
    corner cases.  It is wise to put any pandoc operations under

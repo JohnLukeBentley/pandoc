@@ -542,9 +542,11 @@ footnoteSection refLocation startCounter notes = do
   let container x
         | html5
         , epubVersion == Just EPUB3
-                = H5.section ! A.class_ className
+                = H5.section ! A.id "footnotes"
+                             ! A.class_ className
                              ! customAttribute "epub:type" "footnotes" $ x
-        | html5 = H5.section ! A.class_ className
+        | html5 = H5.section ! A.id "footnotes"
+                             ! A.class_ className
                              ! customAttribute "role" "doc-endnotes"
                              $ x
         | slideVariant /= NoSlides = H.div ! A.class_ "footnotes slide" $ x
@@ -684,19 +686,13 @@ attrsToHtml opts (id',classes',keyvals) = do
 imgAttrsToHtml :: PandocMonad m
                => WriterOptions -> Attr -> StateT WriterState m [Attribute]
 imgAttrsToHtml opts attr = do
-  attrs <- attrsToHtml opts (ident,cls,kvs')
-  dimattrs <- toAttrs (dimensionsToAttrList attr)
-  return $ attrs ++ dimattrs
+  attrsToHtml opts (ident,cls, consolidateStyles (kvs' ++ dimensionsToAttrList attr))
   where
     (ident,cls,kvs) = attr
     kvs' = filter isNotDim kvs
     isNotDim ("width", _)  = False
     isNotDim ("height", _) = False
     isNotDim _             = True
-
-dimensionsToAttrList :: Attr -> [(Text, Text)]
-dimensionsToAttrList attr = consolidateStyles $ go Width ++ go Height
-  where
     consolidateStyles :: [(Text, Text)] -> [(Text, Text)]
     consolidateStyles xs =
       case partition isStyle xs of
@@ -704,6 +700,10 @@ dimensionsToAttrList attr = consolidateStyles $ go Width ++ go Height
            (ss, rest) -> ("style", T.intercalate ";" $ map snd ss) : rest
     isStyle ("style", _) = True
     isStyle _            = False
+
+dimensionsToAttrList :: Attr -> [(Text, Text)]
+dimensionsToAttrList attr = go Width ++ go Height
+  where
     go dir = case dimension dir attr of
                (Just (Pixel a)) -> [(tshow dir, tshow a)]
                (Just x)         -> [("style", tshow dir <> ":" <> tshow x)]
@@ -1642,8 +1642,6 @@ blockListToNote opts ref blocks = do
   let noteItem' = case epubVersion of
                        Just EPUB3 -> noteItem !
                                        customAttribute "epub:type" "footnote"
-                       _ | html5  -> noteItem !
-                                       customAttribute "role" "doc-endnote"
                        _          -> noteItem
   return $ nl >> noteItem'
 
