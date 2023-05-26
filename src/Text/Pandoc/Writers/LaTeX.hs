@@ -3,10 +3,11 @@
 {-# LANGUAGE TupleSections       #-}
 {-# LANGUAGE PatternGuards       #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE ViewPatterns        #-}
 {- |
    Module      : Text.Pandoc.Writers.LaTeX
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -20,9 +21,20 @@ module Text.Pandoc.Writers.LaTeX (
   , writeBeamer
   ) where
 import Control.Monad.State.Strict
+    ( MonadState(get, put),
+      gets,
+      modify,
+      evalStateT )
+import Control.Monad
+    ( MonadPlus(mplus),
+      liftM,
+      when,
+      unless )
+import Data.Containers.ListUtils (nubOrd)
 import Data.Char (isDigit)
 import Data.List (intersperse, (\\))
 import Data.Maybe (catMaybes, fromMaybe, isJust, mapMaybe, isNothing)
+import Data.Monoid (Any (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Network.URI (unEscapeString)
@@ -37,6 +49,7 @@ import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI
 import Text.Pandoc.Slides
 import Text.Pandoc.Walk (query, walk, walkM)
 import Text.Pandoc.Writers.LaTeX.Caption (getCaption)
@@ -67,12 +80,12 @@ writeBeamer options document =
 pandocToLaTeX :: PandocMonad m
               => WriterOptions -> Pandoc -> LW m Text
 pandocToLaTeX options (Pandoc meta blocks) = do
-  -- Strip off final 'references' header if --natbib or --biblatex
+  -- Strip off 'references' header if --natbib or --biblatex
   let method = writerCiteMethod options
+  let isRefsDiv (Div ("refs",_,_) _) = True
+      isRefsDiv _ = False
   let blocks' = if method == Biblatex || method == Natbib
-                   then case reverse blocks of
-                             Div ("refs",_,_) _:xs -> reverse xs
-                             _                     -> blocks
+                   then filter (not . isRefsDiv) blocks
                    else blocks
   -- see if there are internal links
   let isInternalLink (Link _ _ (s,_))
@@ -87,8 +100,10 @@ pandocToLaTeX options (Pandoc meta blocks) = do
               (fmap chomp . inlineListToLaTeX)
               meta
   let chaptersClasses = ["memoir","book","report","scrreprt","scrreport",
-                        "scrbook","extreport","extbook","tufte-book"]
-  let frontmatterClasses = ["memoir","book","scrbook","extbook","tufte-book"]
+                        "scrbook","extreport","extbook","tufte-book",
+                        "ctexrep","ctexbook","elegantbook"]
+  let frontmatterClasses = ["memoir","book","scrbook","extbook","tufte-book",
+                           "ctexbook","elegantbook"]
   -- these have \frontmatter etc.
   beamer <- gets stBeamer
   let documentClass =
@@ -121,7 +136,7 @@ pandocToLaTeX options (Pandoc meta blocks) = do
   titleMeta <- stringToLaTeX TextString $ stringify $ docTitle meta
   authorsMeta <- mapM (stringToLaTeX TextString . stringify) $ docAuthors meta
   docLangs <- catMaybes <$>
-      mapM (toLang . Just) (ordNub (query (extract "lang") blocks))
+      mapM (toLang . Just) (nubOrd (query (extract "lang") blocks))
   let hasStringValue x = isJust (getField x metadata :: Maybe (Doc Text))
   let geometryFromMargins = mconcat $ intersperse ("," :: Doc Text) $
                             mapMaybe (\(x,y) ->
@@ -163,6 +178,8 @@ pandocToLaTeX options (Pandoc meta blocks) = do
                   defField "numbersections" (writerNumberSections options) $
                   defField "lhs" (stLHS st) $
                   defField "graphics" (stGraphics st) $
+                  defField "subfigure" (stSubfigure st) $
+                  defField "svg" (stSVG st) $
                   defField "has-chapters" (stHasChapters st) $
                   defField "has-frontmatter" (documentClass `elem` frontmatterClasses) $
                   defField "listings" (writerListings options || stLHS st) $
@@ -206,9 +223,9 @@ pandocToLaTeX options (Pandoc meta blocks) = do
           maybe id (\l -> defField "lang"
                       (literal $ renderLang l)) mblang
         $ maybe id (\l -> defField "babel-lang"
-                      (literal $ toBabel l)) mblang
+                      (literal l)) (mblang >>= toBabel)
         $ defField "babel-otherlangs"
-             (map (literal . toBabel) docLangs)
+             (map literal $ mapMaybe toBabel docLangs)
         $ defField "latex-dir-rtl"
            ((render Nothing <$> getField "dir" context) ==
                Just ("rtl" :: Text)) context
@@ -257,7 +274,6 @@ isListBlock _                  = False
 blockToLaTeX :: PandocMonad m
              => Block     -- ^ Block to convert
              -> LW m (Doc Text)
-blockToLaTeX Null = return empty
 blockToLaTeX (Div attr@(identifier,"block":dclasses,_)
              (Header _ _ ils : bs)) = do
   let blockname
@@ -280,17 +296,18 @@ blockToLaTeX (Div (identifier,"slide":dclasses,dkvs)
       hasCodeBlock _               = []
   let hasCode (Code _ _) = [True]
       hasCode _          = []
-  let classes = ordNub $ dclasses ++ hclasses
-  let kvs = ordNub $ dkvs ++ hkvs
+  let classes = nubOrd $ dclasses ++ hclasses
+  let kvs = nubOrd $ dkvs ++ hkvs
   let fragile = "fragile" `elem` classes ||
                 not (null $ query hasCodeBlock bs ++ query hasCode bs)
   let frameoptions = ["allowdisplaybreaks", "allowframebreaks", "fragile",
                       "b", "c", "t", "environment", "s", "squeeze",
                       "label", "plain", "shrink", "standout",
-                      "noframenumbering"]
+                      "noframenumbering", "containsverbatim"]
   let optionslist = ["fragile" | fragile
                                , isNothing (lookup "fragile" kvs)
-                               , "fragile" `notElem` classes] ++
+                               , "fragile" `notElem` classes
+                               , "containsverbatim" `notElem` classes] ++
                     [k | k <- classes, k `elem` frameoptions] ++
                     [k <> "=" <> v | (k,v) <- kvs, k `elem` frameoptions] ++
                     [v | ("frameoptions", v) <- kvs]
@@ -351,21 +368,6 @@ blockToLaTeX (Div (identifier,classes,kvs) bs) = do
   wrapNotes <$> wrapDiv (identifier,classes,kvs) result
 blockToLaTeX (Plain lst) =
   inlineListToLaTeX lst
-blockToLaTeX (SimpleFigure attr@(ident, _, _) txt (src, tit)) = do
-      (capt, captForLof, footnotes) <- getCaption inlineListToLaTeX True txt
-      lab <- labelFor ident
-      let caption = "\\caption" <> captForLof <> braces capt <> lab
-      img <- inlineToLaTeX (Image attr txt (src,tit))
-      innards <- hypertarget True ident $
-                   "\\centering" $$ img $$ caption <> cr
-      let figure = cr <> "\\begin{figure}" $$ innards $$ "\\end{figure}"
-      st <- get
-      return $ (if stInMinipage st
-                 -- can't have figures in notes or minipage (here, table cell)
-                 -- http://www.tex.ac.uk/FAQ-ouparmd.html
-                then cr <> "\\begin{center}" $$ img $+$ capt $$
-                       "\\end{center}"
-                else figure) $$ footnotes
 -- . . . indicates pause in beamer slides
 blockToLaTeX (Para [Str ".",Space,Str ".",Space,Str "."]) = do
   beamer <- gets stBeamer
@@ -561,6 +563,57 @@ blockToLaTeX (Header level (id',classes,_) lst) = do
 blockToLaTeX (Table attr blkCapt specs thead tbodies tfoot) =
   tableToLaTeX inlineListToLaTeX blockListToLaTeX
                (Ann.toTable attr blkCapt specs thead tbodies tfoot)
+blockToLaTeX (Figure (ident, _, _) captnode body) = do
+  (capt, captForLof, footnotes) <- getCaption inlineListToLaTeX True captnode
+  lab <- labelFor ident
+  let caption = "\\caption" <> captForLof <> braces capt <> lab
+
+  isSubfigure <- gets stInFigure
+  modify $ \st -> st{ stInFigure = True }
+  contents <- case body of
+    [b] -> blockToLaTeX b
+    bs  -> mconcat . intersperse (cr <> "\\hfill") <$>
+           mapM (toSubfigure (length bs)) bs
+  innards <- hypertarget True ident $
+    "\\centering" $$ contents $$ caption <> cr
+  modify $ \st ->
+    st{ stInFigure = isSubfigure
+      , stSubfigure = stSubfigure st || isSubfigure
+      }
+
+  let containsTable = getAny . (query $ \case
+        Table {}  -> Any True
+        _         -> Any False)
+  st <- get
+  return $ (case () of
+    _ | containsTable body ->
+          -- placing a longtable in a figure or center environment does
+          -- not make sense.
+          cr <> contents
+    _ | stInMinipage st ->
+          -- can't have figures in notes or minipage (here, table cell)
+          -- http://www.tex.ac.uk/FAQ-ouparmd.html
+          cr <> "\\begin{center}" $$ contents $+$ capt $$ "\\end{center}"
+    _ | isSubfigure ->
+          innards
+    _ ->  cr <> "\\begin{figure}" $$ innards $$ "\\end{figure}")
+    $$ footnotes
+
+toSubfigure :: PandocMonad m => Int -> Block -> LW m (Doc Text)
+toSubfigure nsubfigs blk = do
+  contents <- blockToLaTeX blk
+  let linewidth = tshow @Double (0.9 / fromIntegral nsubfigs) <> "\\linewidth"
+  return $ cr <> case blk of
+    Figure {}    -> vcat
+                    [ "\\begin{subfigure}[t]" <> braces (literal linewidth)
+                    , contents
+                    , "\\end{subfigure}"
+                    ]
+    _            -> vcat
+                    [ "\\begin{minipage}[t]" <> braces (literal linewidth)
+                    , contents
+                    , "\\end{minipage}"
+                    ]
 
 blockListToLaTeX :: PandocMonad m => [Block] -> LW m (Doc Text)
 blockListToLaTeX lst =
@@ -720,6 +773,9 @@ inlineListToLaTeX lst = hcat <$>
 inlineToLaTeX :: PandocMonad m
               => Inline    -- ^ Inline to convert
               -> LW m (Doc Text)
+inlineToLaTeX (Span ("",["mark"],[]) lst) = do
+  modify $ \st -> st{ stStrikeout = True } -- this gives us the soul package
+  inCmd "hl" <$> inlineListToLaTeX lst
 inlineToLaTeX (Span (id',classes,kvs) ils) = do
   linkAnchor <- hypertarget False id' empty
   lang <- toLang $ lookup "lang" kvs
@@ -735,10 +791,9 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
       kvToCmd ("dir","ltr") = Just "LR"
       kvToCmd _ = Nothing
       langCmds =
-        case lang of
-           Just lng -> let l = toBabel lng
-                       in  ["foreignlanguage{" <> l <> "}"]
-           Nothing  -> []
+        case lang >>= toBabel of
+           Just l  -> ["foreignlanguage{" <> l <> "}"]
+           Nothing -> []
   let cmds = mapMaybe classToCmd classes ++ mapMaybe kvToCmd kvs ++ langCmds
   contents <- inlineListToLaTeX ils
   return $
@@ -757,8 +812,8 @@ inlineToLaTeX (Span (id',classes,kvs) ils) = do
         else foldr inCmd contents cmds)
 inlineToLaTeX (Emph lst) = inCmd "emph" <$> inlineListToLaTeX lst
 inlineToLaTeX (Underline lst) = do
-  modify $ \st -> st{ stStrikeout = True } -- this gives us the ulem package
-  inCmd "uline" <$> inlineListToLaTeX lst
+  modify $ \st -> st{ stStrikeout = True } -- this gives us the soul package
+  inCmd "ul" <$> inlineListToLaTeX lst
 inlineToLaTeX (Strong lst) = inCmd "textbf" <$> inlineListToLaTeX lst
 inlineToLaTeX (Strikeout lst) = do
   -- we need to protect VERB in an mbox or we get an error
@@ -767,7 +822,7 @@ inlineToLaTeX (Strikeout lst) = do
   -- incorrect results if there is a space, see #5529
   contents <- inlineListToLaTeX $ walk (concatMap protectCode) lst
   modify $ \s -> s{ stStrikeout = True }
-  return $ inCmd "sout" contents
+  return $ inCmd "st" contents
 inlineToLaTeX (Superscript lst) =
   inCmd "textsuperscript" <$> inlineListToLaTeX lst
 inlineToLaTeX (Subscript lst) =
@@ -932,7 +987,9 @@ inlineToLaTeX il@(Image _ _ (src, _))
       return empty
 inlineToLaTeX (Image attr@(_,_,kvs) _ (source, _)) = do
   setEmptyLine False
-  modify $ \s -> s{ stGraphics = True }
+  let isSVG = ".svg" `T.isSuffixOf` source || ".SVG" `T.isSuffixOf` source
+  modify $ \s -> s{ stGraphics = True
+                  , stSVG = stSVG s || isSVG }
   opts <- gets stOptions
   let showDim dir = let d = text (show dir) <> "="
                     in case dimension dir attr of
@@ -956,7 +1013,7 @@ inlineToLaTeX (Image attr@(_,_,kvs) _ (source, _)) = do
       optList = showDim Width <> showDim Height <>
                 maybe [] (\x -> ["page=" <> literal x]) (lookup "page" kvs) <>
                 maybe [] (\x -> ["trim=" <> literal x]) (lookup "trim" kvs) <>
-                maybe [] (\_ -> ["clip"]) (lookup "clip" kvs)
+                maybe [] (const ["clip"]) (lookup "clip" kvs)
       options = if null optList
                    then empty
                    else brackets $ mconcat (intersperse "," optList)
@@ -966,7 +1023,8 @@ inlineToLaTeX (Image attr@(_,_,kvs) _ (source, _)) = do
   source'' <- stringToLaTeX URLString source'
   inHeading <- gets stInHeading
   return $
-    (if inHeading then "\\protect\\includegraphics" else "\\includegraphics") <>
+    (if inHeading then "\\protect" else "") <>
+      (if isSVG then "\\includesvg" else "\\includegraphics") <>
     options <> braces (literal source'')
 inlineToLaTeX (Note contents) = do
   setEmptyLine False

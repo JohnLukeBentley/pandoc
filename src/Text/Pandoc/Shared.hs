@@ -8,7 +8,7 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {- |
    Module      : Text.Pandoc.Shared
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -22,13 +22,9 @@ module Text.Pandoc.Shared (
                      splitBy,
                      splitTextBy,
                      splitTextByIndices,
-                     ordNub,
-                     findM,
                      -- * Text processing
                      inquotes,
                      tshow,
-                     elemText,
-                     notElemText,
                      stripTrailingNewlines,
                      trim,
                      triml,
@@ -38,9 +34,7 @@ module Text.Pandoc.Shared (
                      camelCaseToHyphenated,
                      camelCaseStrToHyphenated,
                      toRomanNumeral,
-                     escapeURI,
                      tabFilter,
-                     crFilter,
                      -- * Date/time
                      normalizeDate,
                      -- * Pandoc block and inline list processing
@@ -48,15 +42,16 @@ module Text.Pandoc.Shared (
                      extractSpaces,
                      removeFormatting,
                      deNote,
-                     deLink,
                      stringify,
                      capitalize,
                      compactify,
                      compactifyDL,
                      linesToPara,
+                     figureDiv,
                      makeSections,
                      uniqueIdent,
                      inlineListToIdentifier,
+                     textToIdentifier,
                      isHeaderBlock,
                      headerShift,
                      stripEmptyParagraphs,
@@ -66,22 +61,17 @@ module Text.Pandoc.Shared (
                      taskListItemToAscii,
                      handleTaskListItem,
                      addMetaField,
-                     makeMeta,
                      eastAsianLineBreakFilter,
                      htmlSpanLikeElements,
                      filterIpynbOutput,
+                     formatCode,
                      -- * TagSoup HTML handling
                      renderTags',
                      -- * File handling
                      inDirectory,
+                     makeCanonical,
                      collapseFilePath,
-                     uriPathToPath,
                      filteredFilesFromArchive,
-                     -- * URI handling
-                     schemes,
-                     isURI,
-                     -- * Error handling
-                     mapLeft,
                      -- * for squashing blocks
                      blocksToInlines,
                      blocksToInlines',
@@ -89,11 +79,7 @@ module Text.Pandoc.Shared (
                      defaultBlocksSeparator,
                      -- * Safe read
                      safeRead,
-                     safeStrRead,
-                     -- * User data directory
-                     defaultUserDataDir,
-                     -- * Version
-                     pandocVersion
+                     safeStrRead
                     ) where
 
 import Codec.Archive.Zip
@@ -101,21 +87,18 @@ import qualified Control.Exception as E
 import Control.Monad (MonadPlus (..), msum, unless)
 import qualified Control.Monad.State.Strict as S
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.Bifunctor as Bifunctor
+import Data.Containers.ListUtils (nubOrd)
 import Data.Char (isAlpha, isLower, isSpace, isUpper, toLower, isAlphaNum,
                   generalCategory, GeneralCategory(NonSpacingMark,
                   SpacingCombiningMark, EnclosingMark, ConnectorPunctuation))
-import Data.Containers.ListUtils (nubOrd)
-import Data.List (find, intercalate, intersperse, sortOn, foldl')
+import Data.List (find, foldl', groupBy, intercalate, intersperse,
+                  union, sortOn)
 import qualified Data.Map as M
 import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Monoid (Any (..))
 import Data.Sequence (ViewL (..), ViewR (..), viewl, viewr)
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Data.Version (showVersion)
-import Network.URI (URI (uriScheme), escapeURIString, parseURI)
-import Paths_pandoc (version)
 import System.Directory
 import System.FilePath (isPathSeparator, splitDirectories)
 import qualified System.FilePath.Posix as Posix
@@ -130,10 +113,6 @@ import Text.Pandoc.Extensions (Extensions, Extension(..), extensionEnabled)
 import Text.Pandoc.Generic (bottomUp)
 import Text.DocLayout (charWidth)
 import Text.Pandoc.Walk
-
--- | Version number of pandoc library.
-pandocVersion :: T.Text
-pandocVersion = T.pack $ showVersion version
 
 --
 -- List processing
@@ -175,23 +154,6 @@ splitAt' n xs | n <= 0 = ([],xs)
 splitAt' n (x:xs)      = (x:ys,zs)
   where (ys,zs) = splitAt' (n - charWidth x) xs
 
--- | Remove duplicates from a list.
-ordNub :: (Ord a) => [a] -> [a]
-ordNub = nubOrd
-{-# INLINE ordNub #-}
-
--- | Returns the first element in a foldable structure for that the
--- monadic predicate holds true, and @Nothing@ if no such element
--- exists.
-findM :: forall m t a. (Monad m, Foldable t)
-      => (a -> m Bool) -> t a -> m (Maybe a)
-findM p = foldr go (pure Nothing)
-  where
-    go :: a -> m (Maybe a) -> m (Maybe a)
-    go x acc = do
-      b <- p x
-      if b then pure (Just x) else acc
-
 --
 -- Text processing
 --
@@ -203,14 +165,6 @@ inquotes txt = T.cons '\"' (T.snoc txt '\"')
 -- | Like @'show'@, but returns a 'T.Text' instead of a 'String'.
 tshow :: Show a => a -> T.Text
 tshow = T.pack . show
-
--- | @True@ exactly when the @Char@ appears in the @Text@.
-elemText :: Char -> T.Text -> Bool
-elemText c = T.any (== c)
-
--- | @True@ exactly when the @Char@ does not appear in the @Text@.
-notElemText :: Char -> T.Text -> Bool
-notElemText c = T.all (/= c)
 
 -- | Strip trailing newlines from string.
 stripTrailingNewlines :: T.Text -> T.Text
@@ -294,12 +248,6 @@ toRomanNumeral x
   | x >= 1    = "I" <> toRomanNumeral (x - 1)
   | otherwise = ""
 
--- | Escape whitespace and some punctuation characters in URI.
-escapeURI :: T.Text -> T.Text
-escapeURI = T.pack . escapeURIString (not . needsEscaping) . T.unpack
-  where needsEscaping c = isSpace c || c `elemText` "<>|\"{}[]^`"
-
-
 -- | Convert tabs to spaces. Tabs will be preserved if tab stop is set to 0.
 tabFilter :: Int       -- ^ Tab stop
           -> T.Text    -- ^ Input
@@ -313,11 +261,6 @@ tabFilter tabStop = T.unlines . map go . T.lines
                 else s1 <> T.replicate
                        (tabStop - (T.length s1 `mod` tabStop)) (T.pack " ")
                        <> go (T.drop 1 s2)
-
-{-# DEPRECATED crFilter "readers filter crs automatically" #-}
--- | Strip out DOS line endings.
-crFilter :: T.Text -> T.Text
-crFilter = T.filter (/= '\r')
 
 --
 -- Date/time
@@ -399,11 +342,6 @@ removeFormatting = query go . walk (deNote . deQuote)
 deNote :: Inline -> Inline
 deNote (Note _) = Str ""
 deNote x        = x
-
--- | Turns links into spans, keeping just the link text.
-deLink :: Inline -> Inline
-deLink (Link _ ils _) = Span nullAttr ils
-deLink x              = x
 
 -- | Convert pandoc structure to a string with formatting removed.
 -- Footnotes are skipped (since we don't want their contents in link
@@ -491,16 +429,31 @@ combineLines = intercalate [LineBreak]
 linesToPara :: [[Inline]] -> Block
 linesToPara = Para . combineLines
 
+-- | Creates a Div block from figure components. The intended use is in
+-- writers of formats that do not have markup support for figures.
+--
+-- The resulting div is given the class @figure@ and contains the figure
+-- body and the figure caption. The latter is wrapped in a 'Div' of
+-- class @caption@, with the stringified @short-caption@ as attribute.
+figureDiv :: Attr -> Caption -> [Block] -> Block
+figureDiv (ident, classes, kv) (Caption shortcapt longcapt) body =
+  let divattr = ( ident
+              , ["figure"] `union` classes
+              , kv
+              )
+      captkv = maybe mempty (\s -> [("short-caption", stringify s)]) shortcapt
+      capt = [Div ("", ["caption"], captkv) longcapt | not (null longcapt)]
+  in Div divattr (body ++ capt)
+
+-- | Returns 'True' iff the given element is a 'Para'.
 isPara :: Block -> Bool
 isPara (Para _) = True
 isPara _        = False
 
--- | Convert Pandoc inline list to plain text identifier.  HTML
--- identifiers must start with a letter, and may contain only
--- letters, digits, and the characters _-.
+-- | Convert Pandoc inline list to plain text identifier.
 inlineListToIdentifier :: Extensions -> [Inline] -> T.Text
 inlineListToIdentifier exts =
-  dropNonLetter . filterAscii . toIdent . stringify . walk unEmojify
+  textToIdentifier exts . stringify . walk unEmojify
   where
     unEmojify :: [Inline] -> [Inline]
     unEmojify
@@ -509,6 +462,12 @@ inlineListToIdentifier exts =
       | otherwise = id
     unEmoji (Span ("",["emoji"],[("data-emoji",ename)]) _) = Str ename
     unEmoji x = x
+
+-- | Convert string to plain text identifier.
+textToIdentifier :: Extensions -> T.Text -> T.Text
+textToIdentifier exts =
+  dropNonLetter . filterAscii . toIdent
+  where
     dropNonLetter
       | extensionEnabled Ext_gfm_auto_identifiers exts = id
       | otherwise = T.dropWhile (not . isAlpha)
@@ -574,7 +533,8 @@ makeSections numbering mbBaseLevel bs =
                Header level' _ _ -> level' > level
                _                 -> True) ys
       , "column" `notElem` dclasses
-      , "columns" `notElem` dclasses = do
+      , "columns" `notElem` dclasses
+      , "fragment" `notElem` dclasses = do
     inner <- go (Header level hattr title':ys)
     rest <- go xs
     return $
@@ -593,7 +553,7 @@ makeSections numbering mbBaseLevel bs =
   combineAttr :: Attr -> Attr -> Attr
   combineAttr (id1, classes1, kvs1) (id2, classes2, kvs2) =
     (if T.null id1 then id2 else id1,
-     ordNub (classes1 ++ classes2),
+     nubOrd (classes1 ++ classes2),
      foldr (\(k,v) kvs -> case lookup k kvs of
                              Nothing -> (k,v):kvs
                              Just _  -> kvs) mempty (kvs1 ++ kvs2))
@@ -711,14 +671,6 @@ addMetaField key val (Meta meta) =
         tolist (MetaList ys) = ys
         tolist y             = [y]
 
--- | Create 'Meta' from old-style title, authors, date.  This is
--- provided to ease the transition from the old API.
-makeMeta :: [Inline] -> [[Inline]] -> [Inline] -> Meta
-makeMeta title authors date =
-      addMetaField "title" (B.fromList title)
-    $ addMetaField "author" (map B.fromList authors)
-    $ addMetaField "date" (B.fromList date) nullMeta
-
 -- | Remove soft breaks between East Asian characters.
 eastAsianLineBreakFilter :: Pandoc -> Pandoc
 eastAsianLineBreakFilter = bottomUp go
@@ -778,6 +730,26 @@ filterIpynbOutput mode = walk go
                     | otherwise = ""
         go x = x
 
+-- | Reformat 'Inlines' as code, putting the stringlike parts in 'Code'
+-- elements while bringing other inline formatting outside.
+-- The idea is that e.g. `[Str "a",Space,Strong [Str "b"]]` should turn
+-- into `[Code ("",[],[]) "a ", Strong [Code ("",[],[]) "b"]]`.
+-- This helps work around the limitation that pandoc's Code element can
+-- only contain string content (see issue #7525).
+formatCode :: Attr -> Inlines -> Inlines
+formatCode attr = B.fromList . walk fmt . B.toList
+  where
+    isPlaintext (Str _) = True
+    isPlaintext Space = True
+    isPlaintext SoftBreak = True
+    isPlaintext (Quoted _ _) = True
+    isPlaintext _ = False
+    fmt = concatMap go . groupBy (\a b -> isPlaintext a && isPlaintext b)
+      where
+        go xs
+          | all isPlaintext xs = B.toList $ B.codeWith attr $ stringify xs
+          | otherwise = xs
+
 --
 -- TagSoup HTML handling
 --
@@ -801,12 +773,14 @@ inDirectory path action = E.bracket
                              setCurrentDirectory
                              (const $ setCurrentDirectory path >> action)
 
---
--- Error reporting
---
-
-mapLeft :: (a -> b) -> Either a c -> Either b c
-mapLeft = Bifunctor.first
+-- | Canonicalizes a file path by removing redundant @.@ and @..@.
+makeCanonical :: FilePath -> FilePath
+makeCanonical = Posix.joinPath . transformPathParts . splitDirectories
+ where  transformPathParts = reverse . foldl' go []
+        go as        "."  = as
+        go ("..":as) ".." = ["..", ".."] <> as
+        go (_:as)    ".." = as
+        go as        x    = x : as
 
 -- | Remove intermediate "." and ".." directories from a path.
 --
@@ -832,19 +806,6 @@ collapseFilePath = Posix.joinPath . reverse . foldl' go [] . splitDirectories
     isSingleton _   = Nothing
     checkPathSeperator = fmap isPathSeparator . isSingleton
 
--- | Converts the path part of a file: URI to a regular path.
--- On windows, @/c:/foo@ should be @c:/foo@.
--- On linux, @/foo@ should be @/foo@.
-uriPathToPath :: T.Text -> FilePath
-uriPathToPath (T.unpack -> path) =
-#ifdef _WINDOWS
-  case path of
-    '/':ps -> ps
-    ps     -> ps
-#else
-  path
-#endif
-
 --
 -- File selection from the archive
 --
@@ -854,70 +815,6 @@ filteredFilesFromArchive zf f =
   where
     fileAndBinary :: Archive -> FilePath -> Maybe (FilePath, BL.ByteString)
     fileAndBinary a fp = findEntryByPath fp a >>= \e -> Just (fp, fromEntry e)
-
---
--- IANA URIs
---
-
--- | Schemes from http://www.iana.org/assignments/uri-schemes.html plus
--- the unofficial schemes doi, javascript, isbn, pmid.
-schemes :: Set.Set T.Text
-schemes = Set.fromList
-  -- Official IANA schemes
-  [ "aaa", "aaas", "about", "acap", "acct", "acr", "adiumxtra", "afp", "afs"
-  , "aim", "appdata", "apt", "attachment", "aw", "barion", "beshare", "bitcoin"
-  , "blob", "bolo", "browserext", "callto", "cap", "chrome", "chrome-extension"
-  , "cid", "coap", "coaps", "com-eventbrite-attendee", "content", "crid", "cvs"
-  , "data", "dav", "dict", "dis", "dlna-playcontainer", "dlna-playsingle"
-  , "dns", "dntp", "dtn", "dvb", "ed2k", "example", "facetime", "fax", "feed"
-  , "feedready", "file", "filesystem", "finger", "fish", "ftp", "geo", "gg"
-  , "git", "gizmoproject", "go", "gopher", "graph", "gtalk", "h323", "ham"
-  , "hcp", "http", "https", "hxxp", "hxxps", "hydrazone", "iax", "icap", "icon"
-  , "im", "imap", "info", "iotdisco", "ipn", "ipp", "ipps", "irc", "irc6"
-  , "ircs", "iris", "iris.beep", "iris.lwz", "iris.xpc", "iris.xpcs"
-  , "isostore", "itms", "jabber", "jar", "jms", "keyparc", "lastfm", "ldap"
-  , "ldaps", "lvlt", "magnet", "mailserver", "mailto", "maps", "market"
-  , "message", "mid", "mms", "modem", "mongodb", "moz", "ms-access"
-  , "ms-browser-extension", "ms-drive-to", "ms-enrollment", "ms-excel"
-  , "ms-gamebarservices", "ms-getoffice", "ms-help", "ms-infopath"
-  , "ms-media-stream-id", "ms-officeapp", "ms-project", "ms-powerpoint"
-  , "ms-publisher", "ms-search-repair", "ms-secondary-screen-controller"
-  , "ms-secondary-screen-setup", "ms-settings", "ms-settings-airplanemode"
-  , "ms-settings-bluetooth", "ms-settings-camera", "ms-settings-cellular"
-  , "ms-settings-cloudstorage", "ms-settings-connectabledevices"
-  , "ms-settings-displays-topology", "ms-settings-emailandaccounts"
-  , "ms-settings-language", "ms-settings-location", "ms-settings-lock"
-  , "ms-settings-nfctransactions", "ms-settings-notifications"
-  , "ms-settings-power", "ms-settings-privacy", "ms-settings-proximity"
-  , "ms-settings-screenrotation", "ms-settings-wifi", "ms-settings-workplace"
-  , "ms-spd", "ms-sttoverlay", "ms-transit-to", "ms-virtualtouchpad"
-  , "ms-visio", "ms-walk-to", "ms-whiteboard", "ms-whiteboard-cmd", "ms-word"
-  , "msnim", "msrp", "msrps", "mtqp", "mumble", "mupdate", "mvn", "news", "nfs"
-  , "ni", "nih", "nntp", "notes", "ocf", "oid", "onenote", "onenote-cmd"
-  , "opaquelocktoken", "pack", "palm", "paparazzi", "pkcs11", "platform", "pop"
-  , "pres", "prospero", "proxy", "pwid", "psyc", "qb", "query", "redis"
-  , "rediss", "reload", "res", "resource", "rmi", "rsync", "rtmfp", "rtmp"
-  , "rtsp", "rtsps", "rtspu", "secondlife", "service", "session", "sftp", "sgn"
-  , "shttp", "sieve", "sip", "sips", "skype", "smb", "sms", "smtp", "snews"
-  , "snmp", "soap.beep", "soap.beeps", "soldat", "spotify", "ssh", "steam"
-  , "stun", "stuns", "submit", "svn", "tag", "teamspeak", "tel", "teliaeid"
-  , "telnet", "tftp", "things", "thismessage", "tip", "tn3270", "tool", "turn"
-  , "turns", "tv", "udp", "unreal", "urn", "ut2004", "v-event", "vemmi"
-  , "ventrilo", "videotex", "vnc", "view-source", "wais", "webcal", "wpid"
-  , "ws", "wss", "wtai", "wyciwyg", "xcon", "xcon-userid", "xfire"
-  , "xmlrpc.beep", "xmlrpc.beeps", "xmpp", "xri", "ymsgr", "z39.50", "z39.50r"
-  , "z39.50s"
-  -- Unofficial schemes
-  , "doi", "isbn", "javascript", "pmid"
-  ]
-
--- | Check if the string is a valid URL with a IANA or frequently used but
--- unofficial scheme (see @schemes@).
-isURI :: T.Text -> Bool
-isURI = maybe False hasKnownScheme . parseURI . T.unpack
-  where
-    hasKnownScheme = (`Set.member` schemes) . T.toLower .
-                     T.filter (/= ':') . T.pack . uriScheme
 
 ---
 --- Squash blocks into inlines
@@ -950,7 +847,7 @@ blockToInlines (Table _ _ _ (TableHead _ hbd) bodies (TableFoot _ fbd)) =
     unTableBody (TableBody _ _ hd bd) = hd <> bd
     unTableBodies = concatMap unTableBody
 blockToInlines (Div _ blks) = blocksToInlines' blks
-blockToInlines Null = mempty
+blockToInlines (Figure _ _ body) = blocksToInlines' body
 
 blocksToInlinesWithSep :: Inlines -> [Block] -> Inlines
 blocksToInlinesWithSep sep =
@@ -968,7 +865,7 @@ defaultBlocksSeparator :: Inlines
 defaultBlocksSeparator =
   -- This is used in the pandoc.utils.blocks_to_inlines function. Docs
   -- there should be updated if this is changed.
-  B.space <> B.str "¶" <> B.space
+  B.linebreak
 
 --
 -- Safe read
@@ -982,24 +879,3 @@ safeStrRead s = case reads s of
                   (d,x):_
                     | all isSpace x -> return d
                   _                 -> mzero
---
--- User data directory
---
-
--- | Return appropriate user data directory for platform.  We use
--- XDG_DATA_HOME (or its default value), but for backwards compatibility,
--- we fall back to the legacy user data directory ($HOME/.pandoc on *nix)
--- if the XDG_DATA_HOME is missing and this exists.  If neither directory
--- is present, we return the XDG data directory.  If the XDG data directory
--- is not defined (e.g. because we are in an environment where $HOME is
--- not defined), we return the empty string.
-defaultUserDataDir :: IO FilePath
-defaultUserDataDir = do
-  xdgDir <- E.catch (getXdgDirectory XdgData "pandoc")
-               (\(_ :: E.SomeException) -> return mempty)
-  legacyDir <- getAppUserDataDirectory "pandoc"
-  xdgExists <- doesDirectoryExist xdgDir
-  legacyDirExists <- doesDirectoryExist legacyDir
-  if not xdgExists && legacyDirExists
-     then return legacyDir
-     else return xdgDir

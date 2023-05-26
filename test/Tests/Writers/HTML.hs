@@ -84,6 +84,11 @@ tests =
       doubleQuoted (spanWith ("", [], [("cite", "http://example.org")]) (str "examples"))
       =?> "<q cite=\"http://example.org\">examples</q>"
     ]
+  , testGroup "code"
+    [ "code should be rendered correctly" =:
+      plain (codeWith ("",[],[]) "Answer is 42") =?>
+      "<code>Answer is 42</code>"
+    ]
   , testGroup "sample"
     [ "sample should be rendered correctly" =:
       plain (codeWith ("",["sample"],[]) "Answer is 42") =?>
@@ -188,13 +193,13 @@ tests =
           , "<p>A note inside a block quote.<a href=\"#fn2\" class=\"footnote-ref\" id=\"fnref2\"><sup>2</sup></a></p>"
           , "<p>A second paragraph.</p>"
           , "</blockquote>"
-          , "</div>"
           , "<div class=\"footnotes footnotes-end-of-section\">"
           , "<hr />"
           , "<ol>"
           , "<li id=\"fn1\"><p>Down here.<a href=\"#fnref1\" class=\"footnote-back\">↩︎</a></p></li>"
           , "<li id=\"fn2\"><p>The second note.<a href=\"#fnref2\" class=\"footnote-back\">↩︎</a></p></li>"
           , "</ol>"
+          , "</div>"
           , "</div>"
           , "<div class=\"section level2\">"
           , "<h2>Second section</h2>"

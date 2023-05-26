@@ -14,7 +14,8 @@ Conversion of JATS XML to 'Pandoc' document.
 -}
 
 module Text.Pandoc.Readers.JATS ( readJATS ) where
-import Control.Monad.State.Strict
+import Control.Monad.State.Strict ( StateT(runStateT), gets, modify )
+import Control.Monad (forM_,  when, unless, MonadPlus(mplus))
 import Control.Monad.Except (throwError)
 import Text.Pandoc.Error (PandocError(..))
 import Data.Char (isDigit, isSpace)
@@ -26,7 +27,7 @@ import Data.Maybe (maybeToList, fromMaybe, catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
-import Text.HTML.TagSoup.Entity (lookupEntity)
+import Text.Pandoc.XML (lookupEntity)
 import Text.Pandoc.Builder
 import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Options
@@ -37,7 +38,6 @@ import Text.TeXMath (readMathML, writeTeX)
 import qualified Data.Set as S (fromList, member)
 import Data.Set ((\\))
 import Text.Pandoc.Sources (ToSources(..), sourcesToText)
-import qualified Data.Foldable as DF
 
 type JATS m = StateT JATSState m
 
@@ -47,6 +47,7 @@ data JATSState = JATSState{ jatsSectionLevel :: Int
                           , jatsBook         :: Bool
                           , jatsFootnotes    :: Map.Map Text Blocks
                           , jatsContent      :: [Content]
+                          , jatsInFigure     :: Bool
                           } deriving Show
 
 instance Default JATSState where
@@ -55,7 +56,8 @@ instance Default JATSState where
                  , jatsMeta = mempty
                  , jatsBook = False
                  , jatsFootnotes = mempty
-                 , jatsContent = [] }
+                 , jatsContent = []
+                 , jatsInFigure = False }
 
 
 readJATS :: (PandocMonad m, ToSources a)
@@ -188,7 +190,11 @@ parseBlock (Elem e) =
                           <$> getBlocks e
         "table-wrap" -> divWith (attrValue "id" e, ["table-wrap"], [])
                           <$> getBlocks e
-        "caption" -> divWith (attrValue "id" e, ["caption"], []) <$> sect 6
+        "caption" -> do
+          inFigure <- gets jatsInFigure
+          if inFigure -- handled by parseFigure
+             then return mempty
+             else divWith (attrValue "id" e, ["caption"], []) <$> sect 6
         "fn-group" -> parseFootnoteGroup
         "ref-list" -> parseRefList e
         "?xml"  -> return mempty
@@ -231,29 +237,18 @@ parseBlock (Elem e) =
                      terms' <- mapM getInlines terms
                      items' <- mapM getBlocks items
                      return (mconcat $ intersperse (str "; ") terms', items')
-         parseFigure =
-           -- if a simple caption and single graphic, we emit a standard
-           -- implicit figure.  otherwise, we emit a div with the contents
-           case filterChildren (named "graphic") e of
-                  [g] -> do
-                         capt <- case filterChild (named "caption") e of
-                                        Just t  -> mconcat .
-                                          intersperse linebreak <$>
-                                          mapM getInlines
-                                          (filterChildren (const True) t)
-                                        Nothing -> return mempty
-
-                         let figAttributes = DF.toList $
-                              ("alt", ) . strContent <$>
-                              filterChild (named "alt-text") e
-
-                         return $ simpleFigureWith
-                          (attrValue "id" e, [], figAttributes)
-                          capt
-                          (attrValue "href" g)
-                          (attrValue "title" g)
-
-                  _   -> divWith (attrValue "id" e, ["fig"], []) <$> getBlocks e
+         parseFigure = do
+           modify $ \st -> st{ jatsInFigure = True }
+           capt <- case filterChild (named "caption") e of
+                     Just t  -> mconcat . intersperse linebreak <$>
+                                mapM getInlines (filterChildren (const True) t)
+                     Nothing -> return mempty
+           contents <- getBlocks e
+           modify $ \st -> st{ jatsInFigure = False }
+           return $ figureWith
+             (attrValue "id" e, [], [])
+             (simpleCaption $ plain capt)
+             contents
          parseFootnoteGroup = do
            forM_ (filterChildren (named "fn") e) $ \fn -> do
              let id' = attrValue "id" fn
@@ -273,26 +268,29 @@ parseBlock (Elem e) =
                                            Just c -> filterChildren isColspec c
                                            _      -> filterChildren isColspec e'
                       let isRow x = named "row" x || named "tr" x
-                      headrows <- case filterChild (named "thead") e' of
-                                       Just h  -> case filterChild isRow h of
-                                                       Just x  -> parseRow x
-                                                       Nothing -> return []
-                                       Nothing -> return []
-                      bodyrows <- case filterChild (named "tbody") e' of
-                                       Just b  -> mapM parseRow
-                                                  $ filterChildren isRow b
-                                       Nothing -> mapM parseRow
-                                                  $ filterChildren isRow e'
+
+                      -- list of header cell elements
+                      let headRowElements = case filterChild (named "thead") e' of
+                                      Just h -> maybe [] parseElement (filterChild isRow h)
+                                      Nothing -> []
+                      -- list of list of body cell elements 
+                      let bodyRowElements = case filterChild (named "tbody") e' of
+                                      Just b -> map parseElement $ filterChildren isRow b
+                                      Nothing -> map parseElement $ filterChildren isRow e'
                       let toAlignment c = case findAttr (unqual "align") c of
                                                 Just "left"   -> AlignLeft
                                                 Just "right"  -> AlignRight
                                                 Just "center" -> AlignCenter
                                                 _             -> AlignDefault
+                      let toColSpan element = fromMaybe 1 $ 
+                            findAttr (unqual "colspan") element >>= safeRead
+                      let toRowSpan element =  fromMaybe 1 $ 
+                            findAttr (unqual "rowspan") element >>= safeRead
                       let toWidth c = do
                             w <- findAttr (unqual "colwidth") c
                             n <- safeRead $ "0" <> T.filter (\x -> isDigit x || x == '.') w
                             if n > 0 then Just n else Nothing
-                      let numrows = foldl' max 0 $ map length bodyrows
+                      let numrows = foldl' max 0 $ map length bodyRowElements
                       let aligns = case colspecs of
                                      [] -> replicate numrows AlignDefault
                                      cs -> map toAlignment cs
@@ -303,15 +301,26 @@ parseBlock (Elem e) =
                                                 Just ws' -> let tot = sum ws'
                                                             in  ColWidth . (/ tot) <$> ws'
                                                 Nothing  -> replicate numrows ColWidthDefault
-                      let toRow = Row nullAttr . map simpleCell
-                          toHeaderRow l = [toRow l | not (null l)]
+
+                      let parseCell = parseMixed plain . elContent
+                      let elementToCell element = cell
+                            (toAlignment element)
+                            (RowSpan $ toRowSpan element)
+                            (ColSpan $ toColSpan element) 
+                            <$> (parseCell element)
+                      let rowElementsToCells elements = mapM elementToCell elements
+                      let toRow = fmap (Row nullAttr) . rowElementsToCells
+                          toHeaderRow element = sequence $ [toRow element | not (null element)]
+
+                      headerRow <- toHeaderRow headRowElements
+                      bodyRows <- mapM toRow bodyRowElements
                       return $ table (simpleCaption $ plain capt)
                                      (zip aligns widths)
-                                     (TableHead nullAttr $ toHeaderRow headrows)
-                                     [TableBody nullAttr 0 [] $ map toRow bodyrows]
+                                     (TableHead nullAttr headerRow)
+                                     [TableBody nullAttr 0 [] bodyRows]
                                      (TableFoot nullAttr [])
          isEntry x  = named "entry" x || named "td" x || named "th" x
-         parseRow = mapM (parseMixed plain . elContent) . filterChildren isEntry
+         parseElement = filterChildren isEntry
          sect n = do isbook <- gets jatsBook
                      let n' = if isbook || n == 0 then n + 1 else n
                      labelText <- case filterChild (named "label") e of
@@ -444,6 +453,7 @@ parseRef e = do
           "issue" -> Just . ("issue",) . toMetaValue <$> getInlines el
           "isbn" -> Just . ("ISBN",) . toMetaValue <$> getInlines el
           "issn" -> Just . ("ISSN",) . toMetaValue <$> getInlines el
+          "uri" -> Just . ("url",) . toMetaValue <$> getInlines el
           "fpage" ->
             case filterChild (named "lpage") c of
               Just lp -> Just . ("page",) . toMetaValue <$>
@@ -452,6 +462,8 @@ parseRef e = do
           "publisher-name" -> Just . ("publisher",) . toMetaValue <$> getInlines el
           "publisher-loc" -> Just . ("publisher-place",) . toMetaValue
                                 <$> getInlines el
+          "edition" -> pure $ Just ("edition",
+                               toMetaValue . T.filter isDigit $ strContent el)
           "person-group" -> do names <- mapM getName
                                             (filterChildren (named "name") el)
                                pure $ Just (attrValue "person-group-type" el,
@@ -492,8 +504,8 @@ elementToStr x = x
 
 parseInline :: PandocMonad m => Content -> JATS m Inlines
 parseInline (Text (CData _ s _)) = return $ text s
-parseInline (CRef ref) = return $ maybe (text $ T.toUpper ref) (text . T.pack)
-                                $ lookupEntity (T.unpack ref)
+parseInline (CRef ref) = return $ maybe (text $ T.toUpper ref) text
+                                $ lookupEntity ref
 parseInline (Elem e) =
   case qName (elName e) of
         "italic" -> innerInlines emph

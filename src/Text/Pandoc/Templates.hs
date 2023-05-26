@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Templates
-   Copyright   : Copyright (C) 2009-2022 John MacFarlane
+   Copyright   : Copyright (C) 2009-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -12,6 +12,22 @@
    Portability : portable
 
 Utility functions for working with pandoc templates.
+
+'WithDefaultPartials' and 'WithPartials' are Monad wrappers. Wrapping
+these around an instance of 'PandocMonad' gives different instances of
+'TemplateMonad', with different search behaviors when retrieving
+partials.
+
+To compile a template and limit partial search to pandoc’s data files,
+use @runWithDefaultPartials (compileTemplate ...)@.
+
+To compile a template and allow partials to be found locally (either on
+the file system or via HTTP, in the event that the main template has an
+absolute URL), ue @runWithPartials (compileTemplate ...)@.
+
+'getTemplate' seeks a template locally, or via HTTP if the template has
+an absolute URL, falling back to the data files if not found.
+
 -}
 
 module Text.Pandoc.Templates ( Template
@@ -27,8 +43,9 @@ module Text.Pandoc.Templates ( Template
 import System.FilePath ((<.>), (</>), takeFileName)
 import Text.DocTemplates (Template, TemplateMonad(..), compileTemplate, renderTemplate)
 import Text.Pandoc.Class.CommonState (CommonState(..))
-import Text.Pandoc.Class.PandocMonad (PandocMonad, readDataFile, fetchItem,
+import Text.Pandoc.Class.PandocMonad (PandocMonad, fetchItem,
                                       getCommonState, modifyCommonState)
+import Text.Pandoc.Data (readDataFile)
 import qualified Text.Pandoc.UTF8 as UTF8
 import Control.Monad.Except (catchError, throwError)
 import Data.Text (Text)
@@ -80,8 +97,7 @@ getTemplate tp = UTF8.toText <$>
 getDefaultTemplate :: PandocMonad m
                    => Text           -- ^ Name of writer
                    -> m Text
-getDefaultTemplate writer = do
-  let format = T.takeWhile (`notElem` ("+-" :: String)) writer  -- strip off extensions
+getDefaultTemplate format = do
   case format of
        "native"  -> return ""
        "csljson" -> return ""

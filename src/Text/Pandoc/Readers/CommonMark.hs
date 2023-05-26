@@ -3,7 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {- |
    Module      : Text.Pandoc.Readers.CommonMark
-   Copyright   : Copyright (C) 2015-2022 John MacFarlane
+   Copyright   : Copyright (C) 2015-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -25,16 +25,20 @@ import Text.Pandoc.Class.PandocMonad (PandocMonad)
 import Text.Pandoc.Definition
 import Text.Pandoc.Builder as B
 import Text.Pandoc.Options
-import Text.Pandoc.Error
 import Text.Pandoc.Readers.Metadata (yamlMetaBlock)
-import Control.Monad.Except
+import Control.Monad (MonadPlus(mzero))
+import Control.Monad.Except (  MonadError(throwError) )
 import Data.Functor.Identity (runIdentity)
 import Data.Typeable
 import Text.Pandoc.Parsing (runParserT, getInput, getPosition,
                             runF, defaultParserState, option, many1, anyChar,
-                            Sources(..), ToSources(..), ParserT, Future,
-                            sourceName, sourceLine, incSourceLine)
+                            Sources(..), ToSources(..), ParsecT, Future,
+                            sourceName, sourceLine, incSourceLine,
+                            fromParsecError)
+import Text.Pandoc.Walk (walk)
 import qualified Data.Text as T
+import qualified Data.Attoparsec.Text as A
+import Control.Applicative ((<|>))
 
 -- | Parse a CommonMark formatted string into a 'Pandoc' structure.
 readCommonMark :: (PandocMonad m, ToSources a)
@@ -77,7 +81,7 @@ sourceToToks (pos, s) = map adjust $ tokenize (sourceName pos) s
 
 
 metaValueParser :: Monad m
-                => ReaderOptions -> ParserT Sources st m (Future st MetaValue)
+                => ReaderOptions -> ParsecT Sources st m (Future st MetaValue)
 metaValueParser opts = do
   inp <- option "" $ T.pack <$> many1 anyChar
   let toks = concatMap sourceToToks (unSources (toSources inp))
@@ -86,15 +90,41 @@ metaValueParser opts = do
      Right (Cm bls :: Cm () Blocks) -> return $ return $ B.toMetaValue bls
 
 readCommonMarkBody :: PandocMonad m => ReaderOptions -> Sources -> [Tok] -> m Pandoc
-readCommonMarkBody opts s toks
-  | isEnabled Ext_sourcepos opts =
-    case runIdentity (parseCommonmarkWith (specFor opts) toks) of
-      Left err -> throwError $ PandocParsecError s err
-      Right (Cm bls :: Cm SourceRange Blocks) -> return $ B.doc bls
-  | otherwise =
-    case runIdentity (parseCommonmarkWith (specFor opts) toks) of
-      Left err -> throwError $ PandocParsecError s err
-      Right (Cm bls :: Cm () Blocks) -> return $ B.doc bls
+readCommonMarkBody opts s toks =
+  (if readerStripComments opts
+      then walk stripBlockComments . walk stripInlineComments
+      else id) <$>
+  if isEnabled Ext_sourcepos opts
+     then case runIdentity (parseCommonmarkWith (specFor opts) toks) of
+            Left err -> throwError $ fromParsecError s err
+            Right (Cm bls :: Cm SourceRange Blocks) -> return $ B.doc bls
+     else case runIdentity (parseCommonmarkWith (specFor opts) toks) of
+            Left err -> throwError $ fromParsecError s err
+            Right (Cm bls :: Cm () Blocks) -> return $ B.doc bls
+
+stripBlockComments :: Block -> Block
+stripBlockComments (RawBlock (B.Format "html") s) =
+  RawBlock (B.Format "html") (removeComments s)
+stripBlockComments x = x
+
+stripInlineComments :: Inline -> Inline
+stripInlineComments (RawInline (B.Format "html") s) =
+  RawInline (B.Format "html") (removeComments s)
+stripInlineComments x = x
+
+removeComments :: Text -> Text
+removeComments s =
+  either (const s) id $ A.parseOnly pRemoveComments s
+ where
+  pRemoveComments = mconcat <$> A.many'
+    ("" <$ (A.string "<!--" *> A.scan (0 :: Int) scanChar <* A.char '>') <|>
+     (A.takeWhile1 (/= '<')) <|>
+     (A.string "<"))
+  scanChar st c =
+    case c of
+      '-' -> Just (st + 1)
+      '>' | st >= 2 -> Nothing
+      _ -> Just 0
 
 specFor :: (Monad m, Typeable m, Typeable a,
             Rangeable (Cm a Inlines), Rangeable (Cm a Blocks))
@@ -127,6 +157,9 @@ specFor opts = foldr ($) defaultSyntaxSpec exts
          [ (footnoteSpec <>) | isEnabled Ext_footnotes opts ] ++
          [ (definitionListSpec <>) | isEnabled Ext_definition_lists opts ] ++
          [ (taskListSpec <>) | isEnabled Ext_task_lists opts ] ++
+         [ (wikilinksSpec TitleAfterPipe <>)
+           | isEnabled Ext_wikilinks_title_after_pipe opts ] ++
+         [ (wikilinksSpec TitleBeforePipe <>)
+           | isEnabled Ext_wikilinks_title_before_pipe opts ] ++
          [ (rebaseRelativePathsSpec <>)
            | isEnabled Ext_rebase_relative_paths opts ]
-

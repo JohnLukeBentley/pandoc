@@ -1,10 +1,13 @@
-packages: pandoc.cabal
+packages: .
+          pandoc-lua-engine
+          pandoc-server
+          pandoc-cli
 tests: True
 flags: +embed_data_files
-constraints: aeson >= 2.0.1.0
+constraints: skylighting-format-blaze-html >= 0.1.1,
+             skylighting-format-context >= 0.1.0.2
 
-
--- source-repository-package
---   type: git
---   location: https://github.com/jgm/doclayout.git
---   tag: b274a5658f3655f31c0bc6175d5b27a9467c1456
+source-repository-package
+  type: git
+  location: https://github.com/jgm/texmath
+  tag: 6f22675a2fec126cfe8aed87af19aae4e55e5eb1

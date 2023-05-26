@@ -2,20 +2,26 @@
 
 - Aaron Wolen
 - Agustín Martín Barbero
+- Akos Marton
 - Albert Krewinkel
 - Alex Ivkin
 - Alex Toldaiev
 - Alex Vong
+- Alexander Batischev
 - Alexander Kondratskiy
 - Alexander Krotov
 - Alexander Sulfrian
 - Alexander V Vershilov
 - Alexandre Franke
 - Alfred Wechselberger
+- Amar Al-Zubaidi
+- Amir Dekel
 - Amogh Rathore
+- Amy de Buitléir
 - Anabra
 - Anders Waldenborg
 - Andreas Lööw
+- Andres Freund
 - Andrew Dunning
 - Andy Morris
 - Aner Lucero
@@ -25,15 +31,17 @@
 - Arata Mizuki
 - Arata Mizuki
 - Arfon Smith
-- Arfon Smith
 - Arlo O'Keeffe
+- Artem Pelenitsyn
 - Artyom Kazak
 - B. Scott Michel
+- Bastien Dumont
 - Ben Firshman
 - Ben Gamari
 - Ben Steinberg
 - Beni Cherniavsky-Paskin
 - Benjamin Bray
+- Benjamin Wuethrich
 - Benoit Schweblin
 - Benson Muite
 - Bjorn Buckwalter
@@ -46,13 +54,17 @@
 - Caleb McDaniel
 - Caleb Mclennan
 - Calvin Beck
+- Carlos Scheidegger
 - Carlos Sosa
 - Carsten Allefeld
+- Castedo Ellerman
 - Cécile Chemin
 - Cédric Couralet
+- Cezary Drożak
 - Charanjit Singh
 - Chris Black
 - Christian Conkle
+- Christian Christiansen
 - Christian Despres
 - Christoffer Ackelman
 - Christoffer Sawicki
@@ -64,6 +76,7 @@
 - Craig S. Bosma
 - Damien Clochard
 - Daniel Bergey
+- Daniel Kessler
 - Daniel Maslowski
 - Daniel T. Staal
 - Daniele D'Orazio
@@ -81,6 +94,7 @@
 - Dmitry Volodin
 - Douglas Calvert
 - Eigil Rischel
+- Elliot Bobrow
 - Emanuel Evans
 - Emerson Harkin
 - Emily Bourke
@@ -109,7 +123,9 @@
 - Frerich Raabe
 - Fyodor Sheremetyev
 - Gabor Pali
+- Gabriel Lewertowski
 - Gavin Beatty
+- Georgi Lyubenov
 - Gottfried Haider
 - Greg Maslov
 - Greg Rundlett
@@ -122,21 +138,26 @@
 - Henrik Tramberend
 - Henry de Valence
 - Herwig Stuetz
+- Hos Es
 - Hubert Plociniczak
 - Ian Max Andolina
 - Igor Khorlo
 - Igor Pashev
+- Ilona Silverwood
 - Ilya V. Portnov
+- Ivan Panchenko
 - Ivan Trubach
 - Ivar de Bruin
 - Ivo Clarysse
 - Jaap de Jong
 - J. B. Rainsberger
 - J. Lewis Muir
+- Jaehwang Jung
 - Jaime Marquínez Ferrándiz
 - Jake Zimmerman
 - Jakob Voß
 - James Aspnes
+- James Scott-Brown
 - Jamie F. Olson
 - Jan Larres
 - Jan Schulz
@@ -150,6 +171,7 @@
 - Jens Getreu
 - Jens Petersen
 - Jesse Hathaway
+- Jeremie Knuesel
 - Jérémy Bobbio
 - Jeroen de Haas
 - Jerry Sky
@@ -173,6 +195,7 @@
 - Juliette Fourcot
 - Juliusz Gonera
 - Justin Bogner
+- Justin Wood
 - Karl Pettersson
 - Keiichiro Shikano
 - Kelsey Hightower
@@ -185,6 +208,7 @@
 - Leif Metcalf
 - Leonard Rosenthol
 - Lila
+- Link Swanson
 - Loïc Grobol
 - Lorenzo
 - Lucas Escot
@@ -192,10 +216,14 @@
 - Lucas V. R
 - Luke Plant
 - Marc Schreiber
+- Marcin Serwin
 - Mario Lang
 - Mark Szepieniec
 - Mark Wright
+- Martin Joerg
 - Martin Linn
+- Martín Pozo
+- Masataka Ogawa
 - Masayoshi Takahashi
 - Matej Kollar
 - Mathias Schenner
@@ -218,8 +246,10 @@
 - Michael Snoyman
 - Michael Thompson
 - Mike Tzou
+- Mikołaj Machowski
 - Milan Bracke
 - MinRK
+- Morgan Willcock
 - Morton Fox
 - Nathan Gass
 - Naveen
@@ -237,6 +267,7 @@
 - Ola Wolska
 - Ole Martin Ruud
 - Oliver Matthews
+- Olivier Benz
 - Ophir Lifshitz
 - Or Neeman
 - OvidiusCicero
@@ -246,15 +277,19 @@
 - Paul Rivier
 - Paul Tilley
 - Paulo Tanimoto
+- Pavol Otto
 - Pete Ryland
 - Peter Fabinksi
 - Peter Wang
 - Philip Pesca
 - Philippe Ombredanne
 - Phillip Alday
+- Pranesh Prakash
+- Prat
 - Prayag Verma
 - Puneeth Chaganti
 - Quinn
+- R. N. West
 - Ralf Stephan
 - Raniere Silva
 - Raymond Ehlers
@@ -262,6 +297,7 @@
 - Rowan Rodrik van der Molen
 - Roland Hieber
 - Roman Beránek
+- Ruqi
 - RyanGlScott
 - S.P.H
 - Salim B
@@ -280,11 +316,17 @@
 - Sidharth Kapur
 - Simon Hengel
 - Simon Schuster
+- Siphalor
 - Stefan Dresselhaus
+- Stephen Altamirano
+- Sukil Etxenike
+- Sukka
 - Sumit Sahrawat
+- Sven Wick
 - TEC
 - Tarik Graba
 - Tatiana Porras
+- Terence Eden
 - Thenaesh Elango
 - Thomas Hodgson
 - Thomas Weißschuh
@@ -294,6 +336,7 @@
 - Timothy Humphries
 - Tiziano Müller
 - Todd Sifleet
+- TomBen
 - Tom Leese
 - Tristan Stenner
 - Tristan de Cacqueray
@@ -309,20 +352,25 @@
 - Viktor Kronvall
 - Vincent
 - Vlad Hanciuta
+- Vladimir Alexiev
 - Waldir Pimenta
 - Wandmalfarbe
+- Wentao Han
 - Wikiwide
 - William Lupton
+- William Rusnack
 - Winnie Hellmann
+- Wout Gevaert
 - Xavier Olive
 - Yan Pashkovsky
+- YI
 - Yoan Blanc
 - Yuchen Pei
 - Zihang Chen
+- arcnmx
 - a-vrma
 - andrebauer
-- argent0
-- badumont
+- black-desk
 - blmage
 - bucklereed
 - bumper314
@@ -338,11 +386,14 @@
 - infinity0x
 - jeongminkim-islab
 - kaizshang91
+- lifeunleaded
 - lux-lth
+- luz paz
 - lwolfsonkin
 - mbrackeantidot
 - mjfs
 - mt_caret
+- nbehrnd
 - niszet
 - nkalvi
 - nuew
@@ -365,6 +416,7 @@
 - thsutton
 - timo-a
 - vijayphoenix
+- vkraven
 - wiefling
 - willj-dev
 - wuffi

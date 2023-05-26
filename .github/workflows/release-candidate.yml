@@ -1,30 +1,11 @@
 name: Release candidate
 
-on:
-  push:
-    branches:
-    - 'rc/**'
+on: workflow_dispatch
 
 permissions:
   contents: read
 
 jobs:
-  linux:
-
-    runs-on: ubuntu-18.04
-    steps:
-    - uses: actions/checkout@v3
-    - name: Create linux package
-      run: |
-          make debpkg
-          mkdir linux-release-candidate
-          cp linux/artifacts/*.deb linux-release-candidate/
-          cp linux/artifacts/*.tar.gz linux-release-candidate/
-    - uses: actions/upload-artifact@v2
-      with:
-        name: linux-release-candidate
-        path: linux-release-candidate
-
   windows:
 
     runs-on: windows-2019
@@ -34,7 +15,8 @@ jobs:
         versions:
           - osarch: "windows-x86_64"
             arch: "x64"
-            stack_opts: "-j1"
+            stack_opts: '-j4 +RTS -A256m -RTS --flag pandoc:embed_data_files --flag pandoc-cli:lua --flag pandoc-cli:server'
+
     steps:
     - uses: actions/checkout@v3
     - name: Install dependencies
@@ -45,7 +27,7 @@ jobs:
       shell: cmd
       run: |
           for /f %%a in ('powershell -Command "Get-Date -format yyyy-MM-dd"') do set THEDATE=%%a
-          stack build  ${{ matrix.versions.stack_opts }} pandoc
+          stack build  ${{ matrix.versions.stack_opts }} pandoc-cli
           for /f "tokens=1-2 delims= " %%a in ('stack exec pandoc -- --version') do (
             @set VERSION=%%b
             goto :next
@@ -80,47 +62,46 @@ jobs:
           copy windows\pandoc-%VERSION%-${{ matrix.versions.osarch }}-UNSIGNED.msi windows-release-candidate
           copy windows\pandoc-%VERSION%-${{ matrix.versions.osarch }}.zip windows-release-candidate
           copy windows\Makefile windows-release-candidate
-    - uses: actions/upload-artifact@v2
+    - uses: actions/upload-artifact@v3
       with:
         name: windows-release-candidate
         path: windows-release-candidate
 
   macos:
 
-    runs-on: macOS-10.15
+    runs-on: macos-11
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Build executable
+    - name: Install ghc and cabal
       run: |
-          stack --no-terminal setup
-          stack --no-terminal update
-          stack --no-terminal install
+        ghcup install ghc --set 9.4
+        ghcup install cabal --set 3.10
 
-    - name: Create artifacts
+    - name: Create release
       run: |
-          export VERSION=$(grep '^[Vv]ersion:' pandoc.cabal | awk '{print $$2;}')
-          export ARTIFACTS=macos-release-candidate
-          export RESOURCES=${ARTIFACTS}/Resources
-          export ROOT=${ARTIFACTS}/pandoc
-          export DEST=${ROOT}/usr/local
-          export ME=$(whoami)
-          export BASE=pandoc-$VERSION
-          mkdir -p ${ARTIFACTS}
-          mkdir -p ${RESOURCES}
-          mkdir -p ${DEST}/bin
-          mkdir -p ${DEST}/share/man/man1
-          cp ~/.local/bin/pandoc ${DEST}/bin/
-          strip ${DEST}/bin/pandoc
-          cp man/pandoc.1 ${DEST}/share/man/man1/pandoc.1
-          ~/.local/bin/pandoc -s COPYING.md -Vpagetitle=License -o ${RESOURCES}/license.html
-          chown -R $ME:staff ${ROOT}
-          sed -e "s/PANDOCVERSION/${VERSION}/" macos/distribution.xml.in > ${ARTIFACTS}/distribution.xml
-          cp macos/Makefile ${ARTIFACTS}/
-          echo ${VERSION} > ${ARTIFACTS}/version.txt
+        sh macos/make_macos_release.sh
 
-    - uses: actions/upload-artifact@v2
+    - uses: actions/upload-artifact@v3
       with:
-        name: macos-release-candidate
-        path: macos-release-candidate
+        name: macos-x86_64
+        path: macos-x86_64
+
+# linux:
+
+#   runs-on: ubuntu-latest
+#   steps:
+#   - uses: actions/checkout@v3
+#   - name: Create linux package
+#     run: |
+#         make debpkg
+#         mkdir linux-release-candidate
+#         cp linux/artifacts/*.deb linux-release-candidate/
+#         cp linux/artifacts/*.tar.gz linux-release-candidate/
+#   - uses: actions/upload-artifact@v3
+#     with:
+#       name: linux-release-candidate
+#       path: linux-release-candidate
+
+

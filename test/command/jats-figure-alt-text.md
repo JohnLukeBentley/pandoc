@@ -8,11 +8,12 @@
   <graphic xlink:href="foo.png" xlink:alt-text="baz" />
 </fig>
 ^D
-[ Para
-    [ Image
-        ( "fig-1" , [] , [ ( "alt" , "alternative-decription" ) ] )
-        [ Str "bar" ]
-        ( "foo.png" , "fig:" )
+[ Figure
+    ( "fig-1" , [] , [] )
+    (Caption Nothing [ Plain [ Str "bar" ] ])
+    [ Plain [ Str "alternative-decription" ]
+    , Para
+        [ Image ( "" , [] , [] ) [ Str "baz" ] ( "foo.png" , "" ) ]
     ]
 ]
 ```

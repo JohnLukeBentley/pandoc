@@ -9,6 +9,7 @@ import Tests.Helpers
 import Text.Pandoc
 import Text.Pandoc.Arbitrary ()
 import Text.Pandoc.Builder
+import qualified Data.Text as T
 
 context :: (ToPandoc a) => a -> String
 context = unpack . purely (writeConTeXt def) . toPandoc
@@ -19,8 +20,10 @@ context' = unpack . purely (writeConTeXt def{ writerWrapText = WrapNone }) . toP
 contextNtb :: (ToPandoc a) => a -> String
 contextNtb = unpack . purely (writeConTeXt def{ writerExtensions = enableExtension Ext_ntb pandocExtensions }) . toPandoc
 
-contextDiv :: (ToPandoc a) => a -> String
-contextDiv = unpack . purely (writeConTeXt def{ writerSectionDivs = True }) . toPandoc
+contextSection :: (ToPandoc a) => a -> String
+contextSection = unpack
+  . purely (writeConTeXt def{ writerTopLevelDivision = TopLevelSection })
+  . toPandoc
 
 {-
   "my test" =: X =?> Y
@@ -42,22 +45,25 @@ infix 4 =:
 tests :: [TestTree]
 tests =
   [ testGroup "inline code"
-    [ "with '}'" =: code "}" =?> "\\mono{\\}}"
+    [ "with '}'" =: code "}" =?> "\\type\"}\""
     , "without '}'" =: code "]" =?> "\\type{]}"
     , "span with ID" =:
       spanWith ("city", [], []) "Berlin" =?>
       "\\reference[city]{}Berlin"
-    , testProperty "code property" $ \s -> null s || '\n' `elem` s ||
-            if '{' `elem` s || '}' `elem` s
-               then context' (code $ pack s) == "\\mono{" ++
-                         context' (str $ pack s) ++ "}"
-               else context' (code $ pack s) == "\\type{" ++ s ++ "}"
+    , testProperty "code property" $ \s ->
+        null s || '\n' `elem` s ||
+        case T.stripPrefix "\\type" (pack $ context' (code $ pack s))
+             >>= T.uncons of
+          Just (c, _) -> c `notElem` s
+          Nothing     -> False
     ]
   , testGroup "headers"
     [ "level 1" =:
       headerWith ("my-header",[],[]) 1 "My header" =?>
-      "\\section[title={My header},reference={my-header}]"
-    , test contextDiv "section-divs" $
+      "\\startsectionlevel[title={My header},reference={my-header}]\n" <>
+      "\n" <>
+      "\\stopsectionlevel"
+    , test contextSection "Section as top-level" $
       (   headerWith ("header1", [], []) 1 (text "Header1")
        <> headerWith ("header2", [], []) 2 (text "Header2")
        <> headerWith ("header3", [], []) 3 (text "Header3")
@@ -131,34 +137,42 @@ tests =
                [TableBody nullAttr 0 [] $ map toRow rows]
                (TableFoot nullAttr [])
       =?> unlines [ "\\startplacetable[title={Table 1}]"
-                  , "\\startTABLE"
-                  , "\\startTABLEhead"
-                  , "\\NC[align=left] Right"
-                  , "\\NC[align=right] Left"
-                  , "\\NC[align=middle] Center"
-                  , "\\NC Default"
-                  , "\\NC\\NR"
-                  , "\\stopTABLEhead"
-                  , "\\startTABLEbody"
-                  , "\\NC[align=left] 1.1"
-                  , "\\NC[align=right] 1.2"
-                  , "\\NC[align=middle] 1.3"
-                  , "\\NC 1.4"
-                  , "\\NC\\NR"
-                  , "\\NC[align=left] 2.1"
-                  , "\\NC[align=right] 2.2"
-                  , "\\NC[align=middle] 2.3"
-                  , "\\NC 2.4"
-                  , "\\NC\\NR"
-                  , "\\stopTABLEbody"
-                  , "\\startTABLEfoot"
-                  , "\\NC[align=left] 3.1"
-                  , "\\NC[align=right] 3.2"
-                  , "\\NC[align=middle] 3.3"
-                  , "\\NC 3.4"
-                  , "\\NC\\NR"
-                  , "\\stopTABLEfoot"
-                  , "\\stopTABLE"
+                  , "\\setupTABLE[column][1][align=left]"
+                  , "\\setupTABLE[column][2][align=right]"
+                  , "\\setupTABLE[column][3][align=middle]"
+                  , "\\setupTABLE[column][4][align=left]"
+                  , "\\bTABLE"
+                  , "\\bTABLEhead"
+                  , "\\bTR"
+                  , "\\bTH Right\\eTH"
+                  , "\\bTH Left\\eTH"
+                  , "\\bTH Center\\eTH"
+                  , "\\bTH Default\\eTH"
+                  , "\\eTR"
+                  , "\\eTABLEhead"
+                  , "\\bTABLEbody"
+                  , "\\bTR"
+                  , "\\bTD 1.1\\eTD"
+                  , "\\bTD 1.2\\eTD"
+                  , "\\bTD 1.3\\eTD"
+                  , "\\bTD 1.4\\eTD"
+                  , "\\eTR"
+                  , "\\bTR"
+                  , "\\bTD 2.1\\eTD"
+                  , "\\bTD 2.2\\eTD"
+                  , "\\bTD 2.3\\eTD"
+                  , "\\bTD 2.4\\eTD"
+                  , "\\eTR"
+                  , "\\bTR"
+                  , "\\bTD 3.1\\eTD"
+                  , "\\bTD 3.2\\eTD"
+                  , "\\bTD 3.3\\eTD"
+                  , "\\bTD 3.4\\eTD"
+                  , "\\eTR"
+                  , "\\eTABLEbody"
+                  , "\\bTABLEfoot"
+                  , "\\eTABLEfoot"
+                  , "\\eTABLE"
                   , "\\stopplacetable" ]
     ]
   ]

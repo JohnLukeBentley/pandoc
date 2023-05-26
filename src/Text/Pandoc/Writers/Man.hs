@@ -3,7 +3,7 @@
 {-# LANGUAGE ViewPatterns      #-}
 {- |
    Module      : Text.Pandoc.Writers.Man
-   Copyright   : Copyright (C) 2007-2022 John MacFarlane
+   Copyright   : Copyright (C) 2007-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -14,7 +14,9 @@ Conversion of 'Pandoc' documents to roff man page format.
 
 -}
 module Text.Pandoc.Writers.Man ( writeMan ) where
-import Control.Monad.State.Strict
+import Control.Monad ( liftM, zipWithM, forM )
+import Control.Monad.State.Strict ( StateT, gets, modify, evalStateT )
+import Control.Monad.Trans (MonadTrans(lift))
 import Data.List (intersperse)
 import Data.List.NonEmpty (nonEmpty)
 import Data.Maybe (fromMaybe)
@@ -27,6 +29,7 @@ import Text.Pandoc.Logging
 import Text.Pandoc.Options
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Writers.Math
 import Text.Pandoc.Writers.Shared
@@ -73,14 +76,16 @@ pandocToMan opts (Pandoc meta blocks) = do
               $ setFieldsFromTitle
               $ defField "has-tables" hasTables
               $ defField "hyphenate" True
-              $ defField "pandoc-version" pandocVersion metadata
+                metadata
   return $ render colwidth $
     case writerTemplate opts of
        Nothing  -> main
        Just tpl -> renderTemplate tpl context
 
 escString :: WriterOptions -> Text -> Text
-escString _ = escapeString AsciiOnly -- for better portability
+escString opts = escapeString (if writerPreferAscii opts
+                                  then AsciiOnly
+                                  else AllowUTF8)
 
 -- | Return man representation of notes.
 notesToMan :: PandocMonad m => WriterOptions -> [[Block]] -> StateT WriterState m (Doc Text)
@@ -105,7 +110,6 @@ blockToMan :: PandocMonad m
            => WriterOptions -- ^ Options
            -> Block         -- ^ Block element
            -> StateT WriterState m (Doc Text)
-blockToMan _ Null = return empty
 blockToMan opts (Div _ bs) = blockListToMan opts bs
 blockToMan opts (Plain inlines) =
   splitSentences <$> inlineListToMan opts inlines
@@ -168,7 +172,6 @@ blockToMan opts (Table _ blkCapt specs thead tbody tfoot) =
   return $ literal ".PP" $$ caption' $$
            literal ".TS" $$ literal "tab(@);" $$ coldescriptions $$
            colheadings' $$ vcat body $$ literal ".TE"
-
 blockToMan opts (BulletList items) = do
   contents <- mapM (bulletListItemToMan opts) items
   return (vcat contents)
@@ -181,6 +184,8 @@ blockToMan opts (OrderedList attribs items) = do
 blockToMan opts (DefinitionList items) = do
   contents <- mapM (definitionListItemToMan opts) items
   return (vcat contents)
+blockToMan opts (Figure attr capt body) = do
+  blockToMan opts (figureDiv attr capt body)
 
 -- | Convert bullet list item (list of blocks) to man.
 bulletListItemToMan :: PandocMonad m => WriterOptions -> [Block] -> StateT WriterState m (Doc Text)

@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Readers.RTF
-   Copyright   : Copyright (C) 2021-2022 John MacFarlane
+   Copyright   : Copyright (C) 2021-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane (<jgm@berkeley.edu>)
@@ -184,7 +184,7 @@ instance Default Properties where
                     , gInTable = False
                     }
 
-type RTFParser m = ParserT Sources RTFState m
+type RTFParser m = ParsecT Sources RTFState m
 
 data ListType = Bullet | Ordered ListAttributes
   deriving (Show, Eq)
@@ -251,7 +251,7 @@ tok = do
     hyph <- option False $ True <$ char '-'
     rest <- many digit
     if null rest
-       then return $! Nothing
+       then return Nothing
        else do
          let pstr = T.pack rest
          case TR.decimal pstr of
@@ -259,7 +259,7 @@ tok = do
                 return $! Just $! if hyph
                                      then (-1) * i
                                      else i
-           _ -> return $! Nothing
+           _ -> return Nothing
   hexVal = do
     char '\''
     x <- hexDigit
@@ -541,7 +541,8 @@ processTok bs (Tok pos tok') = do
                                     TableRow (curCell : cs) : rs
                                   [] -> [TableRow [curCell]] -- shouldn't happen
                            , sCurrentCell = mempty }
-    ControlWord "intbl" _ -> bs <$ modifyGroup (\g -> g{ gInTable = True })
+    ControlWord "intbl" _ ->
+      emitBlocks bs <* modifyGroup (\g -> g{ gInTable = True })
     ControlWord "plain" _ -> bs <$ modifyGroup (const def)
     ControlWord "lquote" _ -> bs <$ addText "\x2018"
     ControlWord "rquote" _ -> bs <$ addText "\x2019"
@@ -590,6 +591,9 @@ processTok bs (Tok pos tok') = do
       modifyGroup (\g -> g{ gSub = boolParam mbp })
     ControlWord "super" mbp -> bs <$
       modifyGroup (\g -> g{ gSuper = boolParam mbp })
+    ControlWord "nosupersub" mbp -> bs <$
+      modifyGroup (\g -> g{ gSuper = not $ boolParam mbp
+                          , gSub = not $ boolParam mbp })
     ControlWord "up" mbp -> bs <$
       modifyGroup (\g -> g{ gSuper = boolParam mbp })
     ControlWord "strike" mbp -> bs <$

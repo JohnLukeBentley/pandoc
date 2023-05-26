@@ -2,7 +2,7 @@
 {-# LANGUAGE ViewPatterns          #-}
 {- |
    Module      : Text.Pandoc.Readers.LaTeX.Inline
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -27,10 +27,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Pandoc.Builder
 import Text.Pandoc.Shared (toRomanNumeral, safeRead)
-import Text.Pandoc.Readers.LaTeX.Types (Tok (..), TokType (..))
+import Text.Pandoc.TeX (Tok (..), TokType (..))
 import Control.Applicative (optional, (<|>))
 import Control.Monad (guard, mzero, mplus, unless)
-import Text.Pandoc.Class.PandocMonad (PandocMonad (..), translateTerm)
+import Text.Pandoc.Class.PandocMonad (PandocMonad (..))
+import Text.Pandoc.Translations (translateTerm)
 import Text.Pandoc.Readers.LaTeX.Parsing
 import Text.Pandoc.Extensions (extensionEnabled, Extension(..))
 import Text.Pandoc.Parsing (getOption, updateState, getState, notFollowedBy,
@@ -394,5 +395,3 @@ doAcronymPlural form = do
   return . mconcat $ [spanWith ("",[],[("acronym-label", untokenize acro),
     ("acronym-form", "plural+" <> form)]) $
    mconcat [str $ untokenize acro, plural]]
-
-

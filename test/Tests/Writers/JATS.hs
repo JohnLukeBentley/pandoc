@@ -11,7 +11,7 @@ import Text.Pandoc.Builder
 import qualified Data.Text as T
 
 jats :: (ToPandoc a) => a -> Text
-jats = purely (writeJATS def{ writerWrapText = WrapNone })
+jats = purely (writeJatsArchiving def{ writerWrapText = WrapNone })
      . toPandoc
 
 jatsArticleAuthoring :: (ToPandoc a) => a -> Text
@@ -88,7 +88,7 @@ tests =
         , "      <fig>"
         , "        <caption><p>caption</p></caption>"
         , "        <graphic mimetype=\"image\" mime-subtype=\"png\"" <>
-          " xlink:href=\"a.png\" xlink:title=\"\" />"
+          " xlink:href=\"a.png\" />"
         , "      </fig>"
         , "    </p>"
         , "  </list-item>"
@@ -134,7 +134,9 @@ tests =
     , "containing image" =:
       header 1 (image "imgs/foo.jpg" "" (text "Alt text")) =?>
       "<sec>\n\
-      \  <title><inline-graphic mimetype=\"image\" mime-subtype=\"jpeg\" xlink:href=\"imgs/foo.jpg\" /></title>\n\
+      \  <title><inline-graphic mimetype=\"image\" mime-subtype=\"jpeg\" xlink:href=\"imgs/foo.jpg\">\n\
+      \    <alt-text>Alt text</alt-text>\n\
+      \  </inline-graphic></title>\n\
       \</sec>"
     ]
 

@@ -1,7 +1,8 @@
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {- |
    Module      : Text.Pandoc.Writers.AsciiDoc
-   Copyright   : Copyright (C) 2006-2022 John MacFarlane
+   Copyright   : Copyright (C) 2006-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -19,7 +20,9 @@ that it has omitted the construct.
 AsciiDoc:  <http://www.methods.co.nz/asciidoc/>
 -}
 module Text.Pandoc.Writers.AsciiDoc (writeAsciiDoc, writeAsciiDoctor) where
+import Control.Monad (foldM)
 import Control.Monad.State.Strict
+    ( StateT, MonadState(get), gets, modify, evalStateT )
 import Data.Char (isPunctuation, isSpace)
 import Data.List (delete, intercalate, intersperse)
 import Data.List.NonEmpty (NonEmpty(..))
@@ -27,6 +30,7 @@ import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Text (Text)
+import System.FilePath (dropExtension)
 import Text.Pandoc.Class.PandocMonad (PandocMonad, report)
 import Text.Pandoc.Definition
 import Text.Pandoc.ImageSize
@@ -35,9 +39,10 @@ import Text.Pandoc.Options
 import Text.Pandoc.Parsing hiding (blankline, space)
 import Text.DocLayout
 import Text.Pandoc.Shared
+import Text.Pandoc.URI
 import Text.Pandoc.Templates (renderTemplate)
 import Text.Pandoc.Writers.Shared
-
+import Text.Pandoc.Walk (walk)
 
 data WriterState = WriterState { defListMarker       :: Text
                                , orderedListLevel    :: Int
@@ -104,15 +109,21 @@ pandocToAsciiDoc opts (Pandoc meta blocks) = do
        Just tpl -> renderTemplate tpl context
 
 -- | Escape special characters for AsciiDoc.
-escapeString :: Text -> Text
-escapeString t
-  | T.any (== '{') t = T.concatMap escChar t
-  | otherwise        = t
-  where escChar '{' = "\\{"
-        escChar c   = T.singleton c
+escapeString :: PandocMonad m => Text -> ADW m (Doc Text)
+escapeString t = do
+  parentTableLevel <- gets tableNestingLevel
+  let needsEscape '{' = True
+      needsEscape '|' = parentTableLevel > 0
+      needsEscape _   = False
+  let escChar c | needsEscape c = "\\" <> T.singleton c
+                | otherwise     = T.singleton c
+  if T.any needsEscape t
+     then return $ literal $ T.concatMap escChar t
+     else return $ literal t
+
 
 -- | Ordered list start parser for use in Para below.
-olMarker :: Parser Text ParserState Char
+olMarker :: Parsec Text ParserState Char
 olMarker = do (start, style', delim) <- anyOrderedListMarker
               if delim == Period &&
                           (style' == UpperAlpha || (style' == UpperRoman &&
@@ -140,7 +151,6 @@ blockToAsciiDoc :: PandocMonad m
                 => WriterOptions -- ^ Options
                 -> Block         -- ^ Block element
                 -> ADW m (Doc Text)
-blockToAsciiDoc _ Null = return empty
 blockToAsciiDoc opts (Div (id',"section":_,_)
                        (Header level (_,cls,kvs) ils : xs)) = do
   hdr <- blockToAsciiDoc opts (Header level (id',cls,kvs) ils)
@@ -149,10 +159,6 @@ blockToAsciiDoc opts (Div (id',"section":_,_)
 blockToAsciiDoc opts (Plain inlines) = do
   contents <- inlineListToAsciiDoc opts inlines
   return $ contents <> blankline
-blockToAsciiDoc opts (SimpleFigure attr alternate (src, tit))
-  -- image::images/logo.png[Company logo, title="blah"]
-  = (\args -> "image::" <> args <> blankline) <$>
-    imageArguments opts attr alternate src tit
 blockToAsciiDoc opts (Para inlines) = do
   contents <- inlineListToAsciiDoc opts inlines
   -- escape if para starts with ordered list marker
@@ -186,7 +192,23 @@ blockToAsciiDoc opts (Header level (ident,_,_) inlines) = do
   return $ identifier $$
            nowrap (text (replicate (level + 1) '=') <> space <> contents) <>
            blankline
-
+blockToAsciiDoc opts (Figure attr (Caption _ longcapt) body) = do
+  -- Images in figures all get rendered as individual block-level images
+  -- with the given caption. Non-image elements are rendered unchanged.
+  capt <- inlineListToAsciiDoc opts (blocksToInlines longcapt)
+  let renderFigElement = \case
+        Plain [Image imgAttr alternate (src, tit)] -> do
+          args <- imageArguments opts imgAttr alternate src tit
+          let figAttributes = case attr of
+                ("", _, _)    -> empty
+                (ident, _, _) -> literal $ "[#" <> ident <> "]"
+          -- .Figure caption
+          -- image::images/logo.png[Company logo, title="blah"]
+          return $ "." <> nowrap capt $$
+            figAttributes $$
+            "image::" <> args <> blankline
+        blk -> blockToAsciiDoc opts blk
+  vcat <$> mapM renderFigElement body
 blockToAsciiDoc _ (CodeBlock (_,classes,_) str) = return $ flush (
   if null classes
      then "...." $$ literal str $$ "...."
@@ -487,7 +509,7 @@ inlineToAsciiDoc opts (Emph lst) = do
   return $ marker <> contents <> marker
 inlineToAsciiDoc opts (Underline lst) = do
   contents <- inlineListToAsciiDoc opts lst
-  return $ "+++" <> contents <> "+++"
+  return $ "[.underline]#" <> contents <> "#"
 inlineToAsciiDoc opts (Strong lst) = do
   contents <- inlineListToAsciiDoc opts lst
   isIntraword <- gets intraword
@@ -522,7 +544,7 @@ inlineToAsciiDoc _ (Code _ str) = do
     if isAsciidoctor
        then text "`+" <> contents <> "+`"
        else text "`"  <> contents <> "`"
-inlineToAsciiDoc _ (Str str) = return $ literal $ escapeString str
+inlineToAsciiDoc _ (Str str) = escapeString str
 inlineToAsciiDoc _ (Math InlineMath str) = do
   isAsciidoctor <- gets asciidoctorVariant
   modify $ \st -> st{ hasMath = True }
@@ -560,7 +582,12 @@ inlineToAsciiDoc opts (Link _ txt (src, _tit)) = do
 -- relative:  link:downloads/foo.zip[download foo.zip]
 -- abs:  http://google.cod[Google]
 -- or my@email.com[email john]
-  linktext <- inlineListToAsciiDoc opts txt
+  let fixCommas (Str t) =
+        intersperse (RawInline (Format "asciidoc") "&#44;")
+          $ map Str $ T.splitOn "," t -- see #8070
+      fixCommas x = [x]
+
+  linktext <- inlineListToAsciiDoc opts $ walk (concatMap fixCommas) txt
   let isRelative = T.all (/= ':') src
   let needsPassthrough = "--" `T.isInfixOf` src
   let prefix = if isRelative
@@ -607,7 +634,7 @@ imageArguments :: PandocMonad m => WriterOptions ->
   ADW m (Doc Text)
 imageArguments opts attr altText src title = do
   let txt = if null altText || (altText == [Str ""])
-               then [Str "image"]
+               then [Str . T.pack . dropExtension $ T.unpack src]
                else altText
   linktext <- inlineListToAsciiDoc opts txt
   let linktitle = if T.null title

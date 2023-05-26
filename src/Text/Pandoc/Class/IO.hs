@@ -32,11 +32,12 @@ module Text.Pandoc.Class.IO
   , readFileStrict
   , readStdinStrict
   , extractMedia
+  , writeMedia
  ) where
 
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.ByteString.Base64 (decodeLenient)
+import Data.ByteString.Base64 (decodeBase64Lenient)
 import Data.ByteString.Lazy (toChunks)
 import Data.Text (Text, pack, unpack)
 import Data.Time (TimeZone, UTCTime)
@@ -125,7 +126,7 @@ openURL u
      let mime     = T.takeWhile (/=',') u''
      let contents = UTF8.fromString $
                      unEscapeString $ T.unpack $ T.drop 1 $ T.dropWhile (/=',') u''
-     return (decodeLenient contents, Just mime)
+     return (decodeBase64Lenient contents, Just mime)
  | otherwise = do
      let toReqHeader (n, v) = (CI.mk (UTF8.fromText n), UTF8.fromText v)
      customHeaders <- map toReqHeader <$> getsCommonState stRequestHeaders

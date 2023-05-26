@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE TupleSections     #-}
 {- |
    Module      : Text.Pandoc.SelfContained
-   Copyright   : Copyright (C) 2011-2022 John MacFarlane
+   Copyright   : Copyright (C) 2011-2023 John MacFarlane
    License     : GNU GPL, version 2 or above
 
    Maintainer  : John MacFarlane <jgm@berkeley.edu>
@@ -18,7 +19,7 @@ import Codec.Compression.GZip as Gzip
 import Control.Applicative ((<|>))
 import Control.Monad.Trans (lift)
 import Data.ByteString (ByteString)
-import Data.ByteString.Base64
+import Data.ByteString.Base64 (encodeBase64)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
@@ -31,11 +32,12 @@ import Text.Pandoc.Class.PandocMonad (PandocMonad (..), fetchItem,
 import Text.Pandoc.Logging
 import Text.Pandoc.Error (PandocError(..))
 import Text.Pandoc.MIME (MimeType)
-import Text.Pandoc.Shared (isURI, renderTags', trim, tshow)
+import Text.Pandoc.Shared (renderTags', trim, tshow)
+import Text.Pandoc.URI (isURI)
 import Text.Pandoc.UTF8 (toString, toText, fromText)
-import Text.Parsec (ParsecT, runParserT)
+import Text.Pandoc.Parsing (ParsecT, runParserT)
+import qualified Text.Pandoc.Parsing as P
 import Control.Monad.Except (throwError, catchError)
-import qualified Text.Parsec as P
 
 isOk :: Char -> Bool
 isOk c = isAscii c && isAlphaNum c
@@ -44,7 +46,7 @@ makeDataURI :: (MimeType, ByteString) -> T.Text
 makeDataURI (mime, raw) =
   if textual
      then "data:" <> mime' <> "," <> T.pack (escapeURIString isOk (toString raw))
-     else "data:" <> mime' <> ";base64," <> toText (encode raw)
+     else "data:" <> mime' <> ";base64," <> encodeBase64 raw
   where textual = "text/" `T.isPrefixOf` mime
         mime' = if textual && T.any (== ';') mime
                    then mime <> ";charset=utf-8"
@@ -62,6 +64,13 @@ convertTags :: PandocMonad m => [Tag T.Text] -> m [Tag T.Text]
 convertTags [] = return []
 convertTags (t@TagOpen{}:ts)
   | fromAttrib "data-external" t == "1" = (t:) <$> convertTags ts
+convertTags (t@(TagOpen "style" _):ts) =
+  case span isTagText ts of
+    (xs,rest) -> do
+      xs' <- mapM (\case
+                    TagText s -> TagText . toText <$> cssURLs "" (fromText s)
+                    tag -> return tag) xs
+      ((t:xs') ++) <$> convertTags rest
 convertTags (t@(TagOpen "script" as):tc@(TagClose "script"):ts) =
   case fromAttrib "src" t of
        ""  -> (t:) <$> convertTags ts

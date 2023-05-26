@@ -37,7 +37,7 @@ without SVG support), [Python] (to use Pandoc filters), and
 Or, you can install pandoc using
 [winget](https://github.com/microsoft/winget-pkgs):
 
-    winget install pandoc
+    winget install --source winget --exact --id JohnMacFarlane.Pandoc
 
 Using multiple installation methods can result in two separate
 installations of pandoc; it is recommended to properly uninstall
@@ -205,10 +205,9 @@ The easiest way to build pandoc from source is to use [stack][stack]:
 
 1.  Install [stack][stack]. Note that Pandoc requires stack >= 1.7.0.
 
-2.  Change to the pandoc source directory and issue the following commands:
-
+2.
         stack setup
-        stack install
+        stack install pandoc-cli
 
     `stack setup` will automatically download the ghc compiler
     if you don't have it.  `stack install` will install the
@@ -216,65 +215,39 @@ The easiest way to build pandoc from source is to use [stack][stack]:
     add to your `PATH`.  This process will take a while, and
     will consume a considerable amount of disk space.
 
+
 ### Quick cabal method
 
-1.  Install the [Haskell platform].  This will give you [GHC] and
-    the [cabal-install] build tool.  Note that pandoc requires
-    GHC >= 7.10 and cabal >= 2.0.
+1.  Install [ghcup](https://www.haskell.org/ghcup/install/).
+    This will give you `ghc` and `cabal`.
 
 2.  Update your package database:
 
         cabal update
 
-3.  Check your cabal version with
+3.  Use `cabal` to install pandoc and its dependencies:
 
-        cabal --version
-
-    If you have a version less than 2.0, install the latest with:
-
-        cabal install cabal-install
-
-4.  Use `cabal` to install pandoc and its dependencies:
-
-        cabal install pandoc
+        cabal install pandoc-cli
 
     This procedure will install the released version of pandoc,
     which will be downloaded automatically from HackageDB.
+    The `pandoc` executable will be placed in `$HOME/.cabal/bin`
+    on linux/unix/macOS and in `%APPDATA%\cabal\bin` on Windows.
+    Make sure this directory is in your path.
 
-    If you want to install a modified or development version
-    of pandoc instead, switch to the source directory and do
-    as above, but without the 'pandoc':
+    If you want to install a modified or development version of
+    pandoc instead, switch to the source directory before running
+    the above command -- cabal will use the local code for all
+    projects mentioned in the `cabal.project`.
 
-        cabal install
-
-5.  Make sure the `$CABALDIR/bin` directory is in your path.  You should
-    now be able to run `pandoc`:
+4.  You should now be able to run `pandoc`:
 
         pandoc --help
 
-    [Not sure where `$CABALDIR` is?](https://wiki.haskell.org/Cabal-Install#The_cabal-install_configuration_file)
-
-5.  By default `pandoc` uses the "i;unicode-casemap" method
-    to sort bibliography entries (RFC 5051).  If you would like to
-    use the locale-sensitive unicode collation algorithm instead,
-    specify the `icu` flag (which affects the dependency `citeproc`):
-
-        cabal install pandoc -ficu
-
-    Note that this requires the `text-icu` library, which in turn
-    depends on the C library `icu4c`.  Installation directions
-    vary by platform.  Here is how it might work on macOS with Homebrew:
-
-        brew install icu4c
-        stack install pandoc \
-          --flag "citeproc:icu" \
-          --extra-lib-dirs=/usr/local/opt/icu4c/lib \
-          --extra-include-dirs=/usr/local/opt/icu4c/include
-
-6.  The `pandoc.1` man page will be installed automatically.  cabal shows
-    you where it is installed: you may need to set your `MANPATH`
-    accordingly. If `MANUAL.txt` has been modified, the man page can be
-    rebuilt: `make man/pandoc.1`.
+5.  Cabal does not install the `pandoc.1` man page, but you can
+    copy it from the `man/` directory of the source code to
+    `/usr/local/share/man/man1/` or wherever man pages go on
+    your system.
 
 
 ### Custom cabal method
@@ -305,12 +278,19 @@ You will need cabal version 2.0 or higher.
 
     `FLAGSPEC` is a list of Cabal configuration flags, optionally
     preceded by a `-` (to force the flag to `false`), and separated
-    by spaces.  Pandoc's flags include:
+    by spaces.  `pandoc`'s flags include:
 
     - `embed_data_files`: embed all data files into the binary (default no).
       This is helpful if you want to create a relocatable binary.
 
-    - `lua53`: embed support for Lua 5.3 instead of 5.4.
+    `pandoc-cli`'s flags include:
+
+    - `lua`:  compile in support for Lua filters and custom
+      writers.
+
+    - `server`:  compile in support for running in HTTP server
+      mode when the executable is renamed (or symlinked as)
+      `pandoc-server`.
 
 3.  Build:
 
@@ -321,19 +301,6 @@ You will need cabal version 2.0 or higher.
 
         cabal haddock --html-location=URL --hyperlink-source
 
-5.  Copy the files:
-
-        cabal copy --destdir=PATH
-
-    The default destdir is `/`.
-
-6.  Register pandoc as a GHC package:
-
-        cabal register
-
-    Package managers may want to use the `--gen-script` option to
-    generate a script that can be run to register the package at
-    install time.
 
 ### Creating a relocatable binary
 
@@ -356,7 +323,6 @@ test`.
 To run particular tests (pattern-matching on their names), use
 the `-p` option:
 
-    cabal install pandoc --enable-tests
     cabal test --test-options='-p markdown'
 
 Or with stack:
@@ -398,7 +364,7 @@ To run just the markdown benchmarks:
 [Arch]: https://www.archlinux.org/packages/community/x86_64/pandoc/
 [Cabal User's Guide]: https://cabal.readthedocs.io/
 [Debian]: https://packages.debian.org/pandoc
-[Fedora]: https://apps.fedoraproject.org/packages/pandoc
+[Fedora]: https://packages.fedoraproject.org/pkgs/pandoc/pandoc/
 [FreeBSD ports]: https://www.freshports.org/textproc/hs-pandoc/
 [GHC]:  https://www.haskell.org/ghc/
 [GitLab CI/CD]: https://about.gitlab.com/stages-devops-lifecycle/continuous-integration/
@@ -422,4 +388,4 @@ To run just the markdown benchmarks:
 [stack]: https://docs.haskellstack.org/en/stable/install_and_upgrade.html
 [cabal-install]: https://hackage.haskell.org/package/cabal-install
 [Void]: https://voidlinux.org/
-[uninstaller]: https://raw.githubusercontent.com/jgm/pandoc/master/macos/uninstall-pandoc.pl
+[uninstaller]: https://raw.githubusercontent.com/jgm/pandoc/main/macos/uninstall-pandoc.pl
